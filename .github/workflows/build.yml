@@ -18,7 +18,7 @@ jobs:
       - name: Download sidecar & ffmpeg
         run: |
           curl -L -o portable.zip https://github.com/jipraks/yt-short-clipper/releases/download/v2.0.7-beta/YTShortClipperV2_2.0.7-beta_x64_portable.zip
-          mkdir src-tauri/binaries
+          mkdir -Force src-tauri/binaries
           7z x portable.zip -o"src-tauri/binaries" -y
       - name: Build
         run: npm run tauri build
