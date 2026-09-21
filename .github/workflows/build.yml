@@ -29,12 +29,14 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          Set-Location src-tauri/target/release/bundle/nsis
-          $exe = Get-ChildItem -Filter *.exe | Select-Object -First 1
+          # Cari .exe di seluruh folder bundle (rekursif) karena struktur dapat berubah
+          $bundlePath = "src-tauri/target/release/bundle"
+          $exe = Get-ChildItem -Path $bundlePath -Recurse -Filter *.exe | Select-Object -First 1
           if ($exe) {
-            Rename-Item $exe.FullName -NewName "YTShortClipperV2_${env:TAG}_x64-setup.exe"
+            $newName = "YTShortClipperV2_${env:TAG}_x64-setup.exe"
+            Rename-Item -Path $exe.FullName -NewName $newName
           } else {
-            Write-Error 'No .exe file found to rename'
+            Write-Error "No .exe file found in $bundlePath to rename"
             exit 1
           }
         shell: pwsh
