@@ -21,7 +21,9 @@ jobs:
           Remove-Item -Recurse -Force src-tauri/binaries -ErrorAction SilentlyContinue
           mkdir -Force src-tauri/binaries
           7z x portable.zip -o"src-tauri/binaries" -y
-      - name: Build
+      - name: Build frontend
+        run: npm run build
+      - name: Build Tauri app
         run: npm run tauri build
       - name: Rename binary to match tag
         env:
