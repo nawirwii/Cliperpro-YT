@@ -100,6 +100,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
         enabled: splitEnabled && !!splitWebcamPath,
         webcamPath: splitWebcamPath,
         topRatio: 0.5,
+        secondPaneMode: "portrait",
         mainVolume: splitMainVolume / 100,
         secondVolume: splitSecondVolume / 100,
       },
