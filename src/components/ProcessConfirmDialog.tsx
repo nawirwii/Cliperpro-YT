@@ -142,7 +142,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       splitScreen: {
         enabled: splitEnabled && !!splitWebcamPath,
         webcamPath: splitWebcamPath,
-        topRatio: 0.80,
+        topRatio: 0.5,
         mainVolume: splitMainVolume / 100,
         secondVolume: splitSecondVolume / 100,
       },
@@ -356,8 +356,8 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--color-text-primary)]">Split Screen</p>
                   <p className="text-xs text-[var(--color-text-muted)] truncate">
-                    Podcast style: main video on top, local webcam below (80:20)
-                  </p>
+                                        Split-screen: portrait top (source) and portrait bottom (webcam) 50% each, face‑tracked
+                                      </p>
                 </div>
               </div>
               <Switch checked={splitEnabled} onCheckedChange={setSplitEnabled} />

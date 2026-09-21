@@ -120,6 +120,8 @@ def process_selected_highlights(
     split_position = split_screen.get("position", "bottom")
     if split_position not in ("top", "bottom"):
         split_position = "bottom"
+    # Mode for second pane: "landscape" (default) or "portrait"
+    second_pane_mode = split_screen.get("secondPaneMode", "portrait")
 
     # Word-level caption timing for the full source video (from the original
     # subtitle track). Empty if unavailable — captions are then skipped.
@@ -176,18 +178,26 @@ def process_selected_highlights(
             # Then stack the local video (cover-cropped landscape strip)
             # underneath.
             log(f"[{i}/{total}] Split-screen mode: reframing main video to portrait pane (face tracking)...")
-            pane_path = str(temp_dir / f"split_pane_{i:03d}.mp4")
-            pane_h = int(round(OUTPUT_HEIGHT * split_top_ratio))
+            pane_path = str(temp_dir / f"split_pane_top_{i:03d}.mp4")
+            top_h = int(round(OUTPUT_HEIGHT * split_top_ratio))
+            # Convert main video to portrait pane (top)
             video_path = convert_to_portrait_pane(
                 video_path, pane_path,
-                output_height=pane_h,
+                output_height=top_h,
                 log=lambda m: log(f"[{i}/{total}] {m}"),
             )
-            log(f"[{i}/{total}] Split-screen top pane ready — stacking main video + local file "
-                f"(top {split_top_ratio:.0%} portrait, bottom {1 - split_top_ratio:.0%} landscape)")
+            # Convert second (webcam) video to portrait pane (bottom)
+            bottom_path = str(temp_dir / f"split_pane_bottom_{i:03d}.mp4")
+            bottom_h = OUTPUT_HEIGHT - top_h
+            video_path_bottom = convert_to_portrait(
+                split_webcam_path, bottom_path,
+                output_height=bottom_h,
+                log=lambda m: log(f"[{i}/{total}] {m}"),
+            )
+            log(f"[{i}/{total}] Split-screen both panes ready — stacking portrait top and bottom (each {split_top_ratio:.0%}/{1 - split_top_ratio:.0%})")
             video_path = combine_split_screen(
                 main_video_path=video_path,
-                second_video_path=split_webcam_path,
+                second_video_path=video_path_bottom,
                 output_path=portrait_path,
                 top_ratio=split_top_ratio,
                 main_volume=split_main_volume,

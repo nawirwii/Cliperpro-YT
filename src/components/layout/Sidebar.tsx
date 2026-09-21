@@ -20,6 +20,7 @@ import { AdvertiseDialog } from "@/components/AdvertiseDialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
 const navItems = [
+// NOTE: Menu rendered horizontally via flex-row
   { to: "/", icon: PlusCircle, label: "Create" },
   { to: "/library", icon: FolderOpen, label: "Library" },
   { to: "/processing-clips", icon: Clapperboard, label: "Processing" },
@@ -55,13 +56,10 @@ export function Sidebar() {
 
   return (
     <aside
-      className={cn(
-        "flex flex-col h-full bg-[var(--color-bg-sidebar)] border-r border-[var(--color-border-light)] transition-all duration-300 ease-in-out",
-        sidebarCollapsed ? "w-16" : "w-[220px]"
-      )}
+      className={cn("flex flex-row w-full h-16 bg-[var(--color-bg-sidebar)] border-b border-[var(--color-border-light)] transition-all duration-300 ease-in-out")}
     >
       {/* Nav items */}
-      <nav className="flex-1 flex flex-col gap-1 p-3 pt-5">
+      <nav className="flex flex-row items-center gap-2 p-2">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
