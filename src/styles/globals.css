@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/* Neo‑Brutalism Design Tokens */
+:root {
+  /* Colors */
+  --color-bg: #FFFDF5;          /* Cream background */
+  --color-primary: #FF6B6B;   /* Hot Red */
+  --color-secondary: #FFD93D; /* Vivid Yellow */
+  --color-muted: #C4B5FD;     /* Soft Violet */
+  --color-text: #000000;      /* Pure black */
+  --color-white: #FFFFFF;
+
+  /* Font */
+  --font-family: "Space Grotesk", sans-serif;
+
+  /* Shadows – hard, no blur */
+  --shadow-sm: 4px 4px 0px 0px var(--color-text);
+  --shadow-md: 8px 8px 0px 0px var(--color-text);
+  --shadow-lg: 12px 12px 0px 0px var(--color-text);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-text);
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-family);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Buttons, inputs, cards will get their own component styles */
+
+  button, input, textarea, select {
+    user-select: none;
+    outline: none;
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-text);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-primary);
+  }
+}
