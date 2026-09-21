@@ -1,0 +1,46 @@
+name: Build Tauri App
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install
+      - name: Download sidecar & ffmpeg
+        run: |
+          curl -L -o portable.zip https://github.com/jipraks/yt-short-clipper/releases/download/v2.0.7-beta/YTShortClipperV2_2.0.7-beta_x64_portable.zip
+          Remove-Item -Recurse -Force src-tauri/binaries -ErrorAction SilentlyContinue
+          mkdir -Force src-tauri/binaries
+          7z x portable.zip -o"src-tauri/binaries" -y
+      - name: Build
+        run: npm run tauri build
+      - name: Rename binary to match tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          Set-Location src-tauri/target/release/bundle/nsis
+          $exe = Get-ChildItem -Filter *.exe | Select-Object -First 1
+          if ($exe) {
+            Rename-Item $exe.FullName -NewName "YTShortClipperV2_${env:TAG}_x64-setup.exe"
+          } else {
+            Write-Error 'No .exe file found to rename'
+            exit 1
+          }
+        shell: pwsh
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release delete $TAG --yes --cleanup-tag || true
+          gh release create $TAG --generate-notes --title "Release $TAG"
+          gh release upload $TAG src-tauri/target/release/bundle/nsis/YTShortClipperV2_${TAG}_x64-setup.exe --clobber
