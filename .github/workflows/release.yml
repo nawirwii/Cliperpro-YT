@@ -87,6 +87,14 @@ jobs:
       - name: Build frontend (Vite)
         run: npm run build
 
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -Path "dist/index.html")) {
+            Write-Error "dist/index.html missing! Frontend build failed."
+          }
+          Get-ChildItem "dist" -Recurse | Select-Object FullName
+
       - name: Build Tauri app + bundle
         run: npm run tauri build
 
