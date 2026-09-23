@@ -20,7 +20,6 @@ import { AdvertiseDialog } from "@/components/AdvertiseDialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 
 const navItems = [
-// NOTE: Menu rendered horizontally via flex-row
   { to: "/", icon: PlusCircle, label: "Create" },
   { to: "/library", icon: FolderOpen, label: "Library" },
   { to: "/processing-clips", icon: Clapperboard, label: "Processing" },
@@ -49,17 +48,34 @@ export function Sidebar() {
   }, []);
 
   const linkClass = cn(
-    "flex items-center gap-3 px-3 py-2 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200 cursor-pointer",
+    "flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200 cursor-pointer",
     "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
     sidebarCollapsed && "justify-center px-0"
   );
 
   return (
     <aside
-      className={cn("flex flex-row w-full h-12 bg-[var(--color-bg-sidebar)] border-b border-[var(--color-border-light)] transition-all duration-300 ease-in-out")}
+      className={cn(
+        "flex flex-col h-screen w-56 bg-[var(--color-bg-sidebar)] border-r border-[var(--color-border-light)] transition-all duration-300 ease-in-out shrink-0",
+        sidebarCollapsed && "w-14"
+      )}
     >
+      {/* App brand */}
+      <div className={cn("px-4 py-4 border-b border-[var(--color-border-light)]", sidebarCollapsed && "px-0 flex justify-center")}>
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-[var(--radius-sm)] bg-[var(--color-accent)] flex items-center justify-center shrink-0">
+            <Clapperboard className="w-4 h-4 text-[var(--color-text-on-accent)]" />
+          </div>
+          {!sidebarCollapsed && (
+            <span className="text-sm font-semibold text-[var(--color-text-primary)] whitespace-nowrap">
+              YT Short Clipper
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* Nav items */}
-      <nav className="flex flex-row items-center gap-1 px-3 py-1">
+      <nav className={cn("flex flex-col gap-1 p-2 flex-1 overflow-y-auto", sidebarCollapsed && "items-center")}>
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -67,22 +83,23 @@ export function Sidebar() {
             end={item.to === "/"}
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200",
+                "flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200 w-full",
                 isActive
                   ? "bg-[var(--color-accent)] text-[var(--color-text-on-accent)] shadow-sm"
                   : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
-                sidebarCollapsed && "justify-center px-0"
+                sidebarCollapsed && "justify-center px-0 w-auto"
               )
             }
+            title={item.label}
           >
             <item.icon className="w-4 h-4 shrink-0" />
-            {!sidebarCollapsed && <span>{item.label}</span>}
+            {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
           </NavLink>
         ))}
 
         {/* External links, served by the menu API */}
         {menuItems.length > 0 && (
-          <div className="mx-1 border-t border-[var(--color-border-light)]" />
+          <div className="my-2 border-t border-[var(--color-border-light)]" />
         )}
 
         {menuItems.map((item) => {
@@ -91,7 +108,7 @@ export function Sidebar() {
             <button
               key={item.id}
               onClick={() => openUrl(item.url).catch(console.error)}
-              className={linkClass}
+              className={cn(linkClass, "w-full", sidebarCollapsed && "w-auto")}
               title={item.label}
             >
               <Icon className="w-4 h-4 shrink-0" />
@@ -102,17 +119,17 @@ export function Sidebar() {
       </nav>
 
       {/* Advertise + theme + version + collapse toggle */}
-      <div className="px-3 py-1 border-t border-[var(--color-border-light)]">
+      <div className="p-3 border-t border-[var(--color-border-light)]">
         {!sidebarCollapsed && (
           <>
             <button
               onClick={() => setShowAdvertise(true)}
-              className="w-full mb-1 text-[10px] leading-tight text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:underline transition-colors cursor-pointer"
+              className="w-full mb-2 text-[10px] leading-tight text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:underline transition-colors cursor-pointer text-center"
             >
               Want your link here?
             </button>
 
-            <div className="mb-1 text-center">
+            <div className="mb-2 text-center">
               <p className="text-[10px] text-[var(--color-text-muted)]">
                 v{APP_VERSION}
               </p>
