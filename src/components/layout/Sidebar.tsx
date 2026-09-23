@@ -49,17 +49,17 @@ export function Sidebar() {
   }, []);
 
   const linkClass = cn(
-    "flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200 cursor-pointer",
+    "flex items-center gap-3 px-3 py-2 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200 cursor-pointer",
     "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
     sidebarCollapsed && "justify-center px-0"
   );
 
   return (
     <aside
-      className={cn("flex flex-row w-full h-16 bg-[var(--color-bg-sidebar)] border-b border-[var(--color-border-light)] transition-all duration-300 ease-in-out")}
+      className={cn("flex flex-row w-full h-12 bg-[var(--color-bg-sidebar)] border-b border-[var(--color-border-light)] transition-all duration-300 ease-in-out")}
     >
       {/* Nav items */}
-      <nav className="flex flex-row items-center gap-2 p-2">
+      <nav className="flex flex-row items-center gap-1 px-3 py-1">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -67,22 +67,22 @@ export function Sidebar() {
             end={item.to === "/"}
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200",
+                "flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200",
                 isActive
-                  ? "bg-[var(--color-accent-light)] text-[var(--color-accent)] border-l-[3px] border-[var(--color-accent)] ml-0 pl-2.5"
+                  ? "bg-[var(--color-accent)] text-[var(--color-text-on-accent)] shadow-sm"
                   : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
                 sidebarCollapsed && "justify-center px-0"
               )
             }
           >
-            <item.icon className="w-5 h-5 shrink-0" />
+            <item.icon className="w-4 h-4 shrink-0" />
             {!sidebarCollapsed && <span>{item.label}</span>}
           </NavLink>
         ))}
 
         {/* External links, served by the menu API */}
         {menuItems.length > 0 && (
-          <div className="my-2 border-t border-[var(--color-border-light)]" />
+          <div className="mx-1 border-t border-[var(--color-border-light)]" />
         )}
 
         {menuItems.map((item) => {
@@ -94,7 +94,7 @@ export function Sidebar() {
               className={linkClass}
               title={item.label}
             >
-              <Icon className="w-5 h-5 shrink-0" />
+              <Icon className="w-4 h-4 shrink-0" />
               {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
             </button>
           );
@@ -102,17 +102,17 @@ export function Sidebar() {
       </nav>
 
       {/* Advertise + theme + version + collapse toggle */}
-      <div className="p-3 border-t border-[var(--color-border-light)]">
+      <div className="px-3 py-1 border-t border-[var(--color-border-light)]">
         {!sidebarCollapsed && (
           <>
             <button
               onClick={() => setShowAdvertise(true)}
-              className="w-full mb-2 text-[10px] leading-tight text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:underline transition-colors cursor-pointer"
+              className="w-full mb-1 text-[10px] leading-tight text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:underline transition-colors cursor-pointer"
             >
               Want your link here?
             </button>
 
-            <div className="mb-2 text-center">
+            <div className="mb-1 text-center">
               <p className="text-[10px] text-[var(--color-text-muted)]">
                 v{APP_VERSION}
               </p>
@@ -133,7 +133,7 @@ export function Sidebar() {
           <button
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             className={cn(
-              "flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)] transition-all duration-200 cursor-pointer",
+              "flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)] transition-all duration-200 cursor-pointer",
               sidebarCollapsed && "px-0 justify-center"
             )}
             title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
@@ -152,16 +152,16 @@ export function Sidebar() {
           <button
             onClick={toggleSidebar}
             className={cn(
-              "flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)] transition-all duration-200 cursor-pointer",
+              "flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)] transition-all duration-200 cursor-pointer",
               sidebarCollapsed && "px-0 justify-center w-full"
             )}
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {sidebarCollapsed ? (
-              <PanelLeftOpen className="w-5 h-5" />
+              <PanelLeftOpen className="w-4 h-4" />
             ) : (
               <>
-                <PanelLeftClose className="w-5 h-5" />
+                <PanelLeftClose className="w-4 h-4" />
                 <span className="text-xs">Collapse</span>
               </>
             )}
