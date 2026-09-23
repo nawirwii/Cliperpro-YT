@@ -1,16 +1,89 @@
 """Watermark overlay: logo image and/or credit text burned into video."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from .helpers import get_ffmpeg_path
+from .helpers import get_ffmpeg_path, _find_bundled
 from .gpu import build_video_enc_args
 
 LogFn = Callable[[str], None]
 
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
+def _find_text_font() -> str | None:
+    """Resolve a usable TTF/OTF font for ffmpeg drawtext across platforms.
+
+    Priority:
+      1. Bundled fonts shipped with the app (Tauri resources / portable stage)
+      2. Windows system fonts (always present: arial/segoe/tahoma)
+      3. Bundled fallback fonts (user hook-style fonts live in fonts/)
+      4. macOS system fonts
+      5. Linux system fonts
+    """
+    # 1. Known bundled font names (if a neutral font is shipped)
+    for name in ("DejaVuSans.ttf", "Arial.ttf", "arial.ttf", "segoeui.ttf"):
+        bundled = _find_bundled(f"fonts/{name}")
+        if bundled:
+            return str(bundled)
+
+    # 2. Windows system fonts — reliable and always present
+    if sys.platform == "win32":
+        win_dir = Path(os.environ.get("WINDIR", r"C:\Windows"))
+        for name in ("arial.ttf", "segoeui.ttf", "tahoma.ttf", "arialbd.ttf"):
+            candidate = win_dir / "Fonts" / name
+            if candidate.exists():
+                return str(candidate)
+        # Last resort: any ttf in C:\Windows\Fonts
+        fonts_dir = win_dir / "Fonts"
+        if fonts_dir.exists():
+            for candidate in fonts_dir.glob("*.ttf"):
+                return str(candidate)
+
+    # 3. Any bundled font already shipped for hook styles (fonts/*)
+    font_names = [
+        "DejaVuSans-Bold.ttf",
+        "Gatchina Regular.ttf",
+        "Capo_Sfogliato.ttf",
+        "Super Hockey.ttf",
+    ]
+    for name in font_names:
+        bundled = _find_bundled(f"fonts/{name}")
+        if bundled:
+            return str(bundled)
+
+    # 4. macOS
+    if sys.platform == "darwin":
+        for base in ("/System/Library/Fonts", "/Library/Fonts"):
+            for name in ("Helvetica.ttc", "Arial Unicode.ttf", "Arial.ttf"):
+                candidate = Path(base) / name
+                if candidate.exists():
+                    return str(candidate)
+
+    # 5. Linux
+    for base in (
+        "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/truetype/liberation",
+        "/usr/share/fonts/truetype/freefont",
+    ):
+        for name in ("DejaVuSans.ttf", "LiberationSans-Regular.ttf", "FreeSans.ttf"):
+            candidate = Path(base) / name
+            if candidate.exists():
+                return str(candidate)
+
+    return None
+
+
+def _escape_filter_path(path: str) -> str:
+    """Make a filesystem path safe inside an ffmpeg filter_complex string."""
+    # ffmpeg on Windows accepts forward slashes; avoids backslash/colon escaping issues.
+    p = path.replace("\\", "/")
+    # Colon in drive letter (C:) must be escaped in filter syntax.
+    p = p.replace(":", "\\:")
+    return f"'{p}'"
 
 
 def apply_watermark(
@@ -51,9 +124,8 @@ def apply_watermark(
     inputs = ["-i", input_video_path]
     filter_parts = []
 
-    # Determine a safe font path (fallback to DejaVuSans if available)
-    default_font = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-    font_path = default_font if Path(default_font).exists() else None
+    # Resolve a font that actually exists on this machine (Windows/macOS/Linux).
+    font_path = _find_text_font()
 
     if has_logo:
         logo_path = watermark["image_path"]
@@ -94,8 +166,10 @@ def apply_watermark(
         display_text = text if len(text) <= max_len else text[:max_len-3] + "..."
         # Escape for ffmpeg
         escaped_display = display_text.replace("'", "\\'").replace(":", "\\:")
-        # Build drawtext filter with background box for readability
-        fontfile_part = f":fontfile={font_path}" if font_path else ""
+        # Build drawtext filter with background box for readability.
+        # fontfile is ALWAYS included (never rely on fontconfig defaults);
+        # path is escaped for Windows drive letters and spaces.
+        fontfile_part = f":fontfile={_escape_filter_path(font_path)}" if font_path else ""
         credit_filter = (
             f"{input_label}drawtext="
             f"text='{escaped_display}':"
