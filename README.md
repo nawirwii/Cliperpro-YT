@@ -1,4 +1,4 @@
-# yt-short-clipper v2
+# Cliperpro
 
 Desktop app that turns long-form YouTube videos into 9:16 short-form clips, with AI highlight detection, face-tracking reframe, and word-by-word captions.
 
