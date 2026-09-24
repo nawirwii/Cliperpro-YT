@@ -131,7 +131,7 @@ jobs:
           # pushed"). Upload assets separately so a 500/timeout on one file can
           # be retried via --clobber instead of failing the whole release.
           gh release create $tag `
-            --title "YT Short Clipper $version (test build)" `
+            --title "Cliperpro $version (test build)" `
             --notes $notes `
             --target main
           gh release upload $tag $portable --clobber
