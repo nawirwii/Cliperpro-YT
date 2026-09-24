@@ -33,6 +33,11 @@ DIVIDER_COLOR = "0xFBBF24"  # gold #fbbf24
 # Media probe cache: probe each file once per process.
 _probe_cache: dict[str, tuple[float, bool]] = {}
 
+# QSV pipeline proven to work on this machine, cached per session so a
+# multi-clip session skips failed GPU pipelines after the first clip.
+# Values: None (unknown), "hwupload", "probe-style-auto-upload".
+_qsv_pipeline: str | None = None
+
 
 def _probe_media(video_path: str) -> tuple[float, bool]:
     """Return ``(duration_seconds, has_audio)`` using only the bundled ffmpeg.
@@ -103,6 +108,7 @@ def combine_split_screen(
     Returns the output path.
     """
     log = log or (lambda m: None)
+    global _qsv_pipeline
     ffmpeg_path = get_ffmpeg_path()
 
     main_dur = _probe_duration(main_video_path)
@@ -213,6 +219,19 @@ def combine_split_screen(
     # Fix (matches gpu.py probe): explicit device + NV12 surface + hwupload
     # with a frame pool. Other HW encoders (nvenc/amf) accept CPU frames
     # directly and keep the plain yuv420p graph.
+    #
+    # We try TWO QSV pipelines before falling back to CPU, because the
+    # gpu.py runtime probe (which the app ran at startup and which SUCCEEDED
+    # on this machine) uses a different shape than the vstack pipeline:
+    #   1. "hwupload": canonical vstack fix — graph ends in
+    #      format=nv12,hwupload=extra_hw_frames=64[v] + explicit device flags.
+    #   2. "probe-style": EXACTLY the probe's shape — CPU yuv420p graph end,
+    #      explicit device flags, NO hwupload in the graph; h264_qsv does the
+    #      upload internally. This mirrors the command that already works on
+    #      the user's GPU.
+    # The first pipeline that completes is remembered for the rest of the
+    # process (_qsv_pipeline), so a multi-clip session never re-tries a
+    # pipeline that already proved broken on this machine.
     is_qsv = enc_name == "h264_qsv"
     qsv_graph = list(filter_parts)
     cpu_graph = list(filter_parts)
@@ -245,21 +264,42 @@ def combine_split_screen(
         ]
 
     log(f"Composing split screen ({OUTPUT_WIDTH}x{OUTPUT_HEIGHT}, top {top_ratio:.0%})...")
-    if is_qsv:
-        cmd = build_video_cmd(
-            ["-init_hw_device", "qsv=hw", "-filter_hw_device", "hw"],
-            qsv_graph,
-            video_enc_args,
-        )
-    else:
-        cmd = build_video_cmd([], cpu_graph, video_enc_args)
-    result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS)
 
-    # Graceful fallback: if the hardware encoder fails (driver quirks, e.g.
-    # QSV -22 at init), retry ONCE on CPU so the clip still completes instead
-    # of crashing the whole session. The user sees a clear warning.
-    if result.returncode != 0 and enc_name:
+    # Build the ordered list of (label, head, graph, enc_args) attempts.
+    # The encoder label in log messages: "Using GPU encoder: h264_qsv
+    # (pipeline=hwupload)" / "(pipeline=probe-style)" so the user can see
+    # which exact command shape succeeded on their hardware.
+    qsv_head = ["-init_hw_device", "qsv=hw", "-filter_hw_device", "hw"]
+    attempts: list[tuple[str, list[str], list[str], list[str]]] = []
+    if is_qsv:
+        if _qsv_pipeline == "hwupload":
+            attempts = [("hwupload", qsv_head, qsv_graph, video_enc_args)]
+        elif _qsv_pipeline == "probe-style":
+            attempts = [("probe-style", qsv_head, cpu_graph, video_enc_args)]
+        else:
+            attempts = [
+                ("hwupload", qsv_head, qsv_graph, video_enc_args),
+                ("probe-style", qsv_head, cpu_graph, video_enc_args),
+            ]
+    else:
+        attempts = [("direct", [], cpu_graph, video_enc_args)]
+
+    result = None
+    for label, head, graph, enc_args in attempts:
+        cmd = build_video_cmd(head, graph, enc_args)
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS)
+        if result.returncode == 0:
+            if enc_name and label != "direct":
+                log(f"Using GPU encoder: {enc_name} (pipeline={label})")
+            break
+        log(f"⚠️ GPU pipeline '{label}' failed — {(result.stderr or '').strip()[-200:]}")
+
+    # Graceful fallback: if every hardware pipeline failed (driver quirks,
+    # e.g. QSV -22 at init), retry ONCE on CPU so the clip still completes
+    # instead of crashing the whole session. The user sees a clear warning.
+    if result is not None and result.returncode != 0 and enc_name:
         log(f"⚠️ Hardware encoder {enc_name} failed — retrying with CPU (libx264)")
+        _qsv_pipeline = None  # next clip should re-probe hardware (maybe transient)
         cpu_cmd = build_video_cmd(
             [],
             cpu_graph,
@@ -269,8 +309,16 @@ def combine_split_screen(
         if result.returncode == 0:
             log("⚠️ Split screen completed with CPU encoder (hardware encoder unavailable)")
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Split screen composition failed: {result.stderr[-500:]}")
+    if result is None or result.returncode != 0:
+        raise RuntimeError(f"Split screen composition failed: {(result.stderr if result else '')[-500:]}")
+
+    # Remember which QSV pipeline worked so later clips skip the broken one.
+    if is_qsv and enc_name and _qsv_pipeline is None:
+        for label, head, graph, enc_args in attempts:
+            # The pipeline that produced result (returncode==0) is the winner.
+            if result.returncode == 0 and label in ("hwupload", "probe-style"):
+                _qsv_pipeline = label
+                break
 
     log("Split screen composition complete")
     return output_path
