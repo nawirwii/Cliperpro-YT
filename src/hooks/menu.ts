@@ -16,15 +16,13 @@ const MAX_ITEMS = 8;
 const MAX_LABEL_CHARS = 32;
 
 /** Menu items blocked by the client — never shown even if the API sends them. */
-const BLOCKED_IDS = new Set(["topup", "tutorial"]);
+const BLOCKED_IDS = new Set(["topup", "tutorial", "discord"]);
 
 /**
  * Shipped with the build and shown on first run, offline, or whenever the API
  * returns nothing usable — the sidebar must never render empty.
  */
-export const DEFAULT_MENU_ITEMS: MenuItem[] = [
-  { id: "discord", label: "Discord Server", icon: "messages-square", url: "https://s.id/ytsdc" },
-];
+export const DEFAULT_MENU_ITEMS: MenuItem[] = [];
 
 function sanitizeItem(raw: unknown): MenuItem | null {
   if (!raw || typeof raw !== "object") return null;
