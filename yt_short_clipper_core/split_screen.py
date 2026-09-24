@@ -157,18 +157,20 @@ def combine_split_screen(
             "[top][bottom]vstack=inputs=2,format=yuv420p[v]",
         ]
 
+    # Audio handling: ALWAYS use -af (separate from video filter_complex)
+    # to avoid "Function not implemented" (fc#0) on Windows with hardware encoders.
+    audio_map = []
     audio_filter = None
     if main_has_audio and second_has_audio:
-        filter_parts.append(
+        # Map both audio streams, mix with amix in -af filtergraph
+        audio_map = ["-map", "0:a", "-map", "1:a"]
+        audio_filter = (
             f"[0:a]volume={main_volume:.2f},aresample=48000[a0];"
             f"[1:a]volume={second_volume:.2f},aresample=48000[a1];"
             f"[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0[a]"
         )
-        audio_map = ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        audio_map += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
     elif main_has_audio:
-        # Direct map (no filtergraph audio): a missing/empty second stream
-        # can't starve a mapped label and trigger "Could not open encoder
-        # before EOF" / zero-packet output.
         audio_map = ["-map", "0:a", "-c:a", "aac", "-b:a", "192k"]
         audio_filter = f"volume={main_volume:.2f}"
     elif second_has_audio:
@@ -177,8 +179,6 @@ def combine_split_screen(
     else:
         audio_map = ["-an"]
         audio_filter = None
-
-    # Select video encoder based on GPU config
     gpu_enabled = gpu_config and gpu_config.get("enabled", False) if gpu_config else False
     enc_name = gpu_config.get("encoder") if gpu_enabled else None
     enc_preset = gpu_config.get("preset") if gpu_enabled else None
