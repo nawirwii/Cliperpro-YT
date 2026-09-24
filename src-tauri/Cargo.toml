@@ -1,7 +1,7 @@
 [package]
 name = "yt-short-clipper-v2"
-version = "2.0.65"
-description = "YT Short Clipper v2"
+version = "2.0.66"
+description = "Cliperpro — YouTube Shorts Clipper (YT Short Clipper v2)"
 authors = ["jipraks"]
 edition = "2021"
 license = "MIT"
