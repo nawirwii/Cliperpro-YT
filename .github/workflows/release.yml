@@ -120,7 +120,7 @@ jobs:
           $tag = "v$version"
           $portable  = "src-tauri\target\release\bundle\YTShortClipperV2_${version}_x64_portable.zip"
           $update    = "src-tauri\target\release\bundle\YTShortClipperV2_${version}_x64_update.zip"
-          $notes = "Test release with GPU detection fix: robust Intel HD/UHD 615 detection (renamed adapters now always detected), dual-GPU priority NVIDIA > AMD > Intel, QSV probe retry with explicit hw init, Linux lspci scans 3D/Display controller lines."
+          $notes = "Credit watermark fix: {channel} placeholder now resolves to the real YouTube channel from the session; credit text typed in the process dialog now wins over saved config; added quick position presets (Top/Middle/Bottom) with Bottom clamped at 72% so it never sits behind the player control bar."
           # Allow re-running the same tag: drop old release + tag first
           gh release view $tag --json tagName -q .tagName 2>$null
           if ($LASTEXITCODE -eq 0) {

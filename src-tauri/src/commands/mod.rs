@@ -569,7 +569,7 @@ fn default_app_config() -> serde_json::Value {
             "fontSize": 24,
             "opacity": 0.7,
             "positionX": 0.03,
-            "positionY": 0.92
+            "positionY": 0.72
         },
         "repliz": {
             "accessKey": "",

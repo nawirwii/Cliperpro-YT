@@ -53,6 +53,60 @@ def _words_for_clip(
     return sliced
 
 
+def _load_session_channel(session_path: Path) -> str:
+    """Load the YouTube channel name saved during the find-highlights phase.
+
+    The placeholder ``{channel}`` in the credit text is replaced with this
+    value at render time. Falls back to an empty string when the session file
+    is missing or the channel could not be detected.
+    """
+    try:
+        data_file = session_path / "session_data.json"
+        if not data_file.exists():
+            return ""
+        with open(data_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        channel = (data.get("video_info") or {}).get("channel") or ""
+        return str(channel).strip()
+    except Exception:
+        return ""
+
+
+def _resolve_credit_text(
+    credit_config: dict[str, Any] | None,
+    options: dict[str, Any],
+    session_path: Path,
+    log: LogFn,
+) -> dict[str, Any] | None:
+    """Apply per-clip credit text overrides and resolve the {channel} placeholder.
+
+    Priority:
+      1. ``options.creditText`` — the value typed in the process confirm dialog
+         (this is what the user actually sees, so it wins over saved config).
+      2. ``ai.credit_watermark.text`` from the saved app config.
+    Then ``{channel}`` is replaced with the real YouTube channel name.
+    """
+    if not credit_config:
+        return None
+    text = str(credit_config.get("text") or "").strip()
+    dialog_text = str(options.get("creditText") or "").strip()
+    if dialog_text:
+        text = dialog_text
+
+    if "{channel}" in text:
+        channel = _load_session_channel(session_path)
+        if channel:
+            text = text.replace("{channel}", channel)
+            log(f"Credit text channel: {channel}")
+        else:
+            # Keep the template but note that the channel name was unavailable.
+            log("Credit text: {channel} left unresolved (no channel info in session)")
+
+    resolved = dict(credit_config)
+    resolved["text"] = text
+    return resolved
+
+
 def _resolve_gpu_config(gpu_config: dict[str, Any] | None, log: LogFn) -> dict[str, Any] | None:
     """Ensure an enabled GPU config carries an encoder.
 
@@ -288,7 +342,12 @@ def process_selected_highlights(
         # Step 5: Watermark overlay (logo + credit text)
         if add_watermark or add_credit_watermark:
             wm_config = ai.get("watermark") if add_watermark else None
-            credit_config = ai.get("credit_watermark") if add_credit_watermark else None
+            credit_config = _resolve_credit_text(
+                ai.get("credit_watermark") if add_credit_watermark else None,
+                options,
+                session_path,
+                log,
+            )
 
             watermark_output_path = str(temp_dir / f"watermarked_{i:03d}.mp4")
             video_path = apply_watermark(

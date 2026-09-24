@@ -214,6 +214,39 @@ export function CreditWatermarkSettingsPage() {
               </div>
             </CardContent>
           </Card>
+        <Card>
+            <CardHeader>
+              <CardTitle>Position</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: "Atas", y: 0.1 },
+                  { label: "Tengah", y: 0.5 },
+                  { label: "Bawah", y: 0.72 },
+                ].map((p) => (
+                  <button
+                    key={p.label}
+                    onClick={() => setPosY(p.y)}
+                    className={`px-2 py-1.5 rounded-[var(--radius-sm)] border text-sm font-medium transition-colors ${
+                      Math.abs(posY - p.y) < 0.05
+                        ? "border-[var(--color-accent)] bg-[var(--color-bg-primary)] text-[var(--color-accent)]"
+                        : "border-transparent bg-[var(--color-bg-primary)] text-[var(--color-text-muted)] hover:border-[var(--color-border-light)]"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Posisi "Bawah" sengaja tidak terlalu dekat tepi bawah agar tidak
+                tertutup tombol/control bar pemutar video.
+              </p>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Kamu juga bisa drag teks di preview untuk posisi bebas.
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Right: 9:16 preview */}

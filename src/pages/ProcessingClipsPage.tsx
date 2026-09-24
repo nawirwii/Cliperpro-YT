@@ -116,7 +116,10 @@ export function ProcessingClipsPage() {
             scale: watermarkConfig.scale,
           },
           credit_watermark: {
-            text: creditConfig.text,
+            // The dialog input (options.creditText) wins over the saved
+            // config — otherwise the placeholder "{channel}" (saved default)
+            // would burn into the video even though the user typed a name.
+            text: options.creditText?.trim() || creditConfig.text,
             color: creditConfig.color,
             font_size: creditConfig.fontSize,
             opacity: creditConfig.opacity,

@@ -152,9 +152,11 @@ def apply_watermark(
         pos_x = credit_watermark.get("position_x", 0.03)
         pos_y = credit_watermark.get("position_y", 0.92)
         # Nawir: keep the credit above the bottom UI-button row so it isn't
-        # clipped/overlap by on-screen controls (0.92 sits too close to edge).
-        if pos_y > 0.9:
-            pos_y = 0.85
+        # clipped/overlap by on-screen controls. Anything below y=0.75 is
+        # pulled up to 0.72 — bottom presets must not sit behind the player
+        # control bar (round-red feedback on v2.0.72).
+        if pos_y > 0.75:
+            pos_y = 0.72
 
         # Convert hex color to ffmpeg format (remove #)
         ff_color = color.lstrip("#")
