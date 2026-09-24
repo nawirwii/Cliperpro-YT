@@ -248,6 +248,7 @@ def process_selected_highlights(
             output_path=section_path,
             log=log,
             max_height=max_height,
+            gpu_config=gpu_config,
         )
         log(f"[{i}/{total}] Section downloaded: {video_path}")
 

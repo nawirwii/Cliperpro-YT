@@ -120,7 +120,7 @@ jobs:
           $tag = "v$version"
           $portable  = "src-tauri\target\release\bundle\YTShortClipperV2_${version}_x64_portable.zip"
           $update    = "src-tauri\target\release\bundle\YTShortClipperV2_${version}_x64_update.zip"
-          $notes = "Credit watermark fix: {channel} placeholder now resolves to the real YouTube channel from the session; credit text typed in the process dialog now wins over saved config; added quick position presets (Top/Middle/Bottom) with Bottom clamped at 72% so it never sits behind the player control bar."
+          $notes = "FIX caption/audio desync: the local section cut now uses an accurate re-encode instead of -ss + -c copy, so clips start EXACTLY at the highlight timestamp and captions lock to the real speech (previously the copy cut started at a keyframe before the requested time, shifting subtitles ~1-5s off). Credit watermark fixes from v2.0.73 also included ({channel} resolves from session, dialog text wins, position presets Top/Middle/Bottom)."
           # Allow re-running the same tag: drop old release + tag first
           gh release view $tag --json tagName -q .tagName 2>$null
           if ($LASTEXITCODE -eq 0) {

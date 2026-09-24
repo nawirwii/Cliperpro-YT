@@ -10,6 +10,7 @@ from typing import Any, Callable
 from .cookies import validate_cookies
 from .helpers import debug_log, get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from .helpers import _get_app_dir
+from .gpu import build_video_enc_args
 
 LogFn = Callable[[str], None]
 
@@ -262,6 +263,93 @@ def _get_cookies_path() -> str:
     raise RuntimeError("cookies.txt not found. Please upload cookies first.")
 
 
+def cut_video_section(
+    full_path: str,
+    output_path: str,
+    start_time: str,
+    end_time: str,
+    log: LogFn | None = None,
+    gpu_config: dict[str, Any] | None = None,
+) -> str:
+    """Cut a full downloaded video to [start_time, end_time] — ACCURATE RE-ENCODE.
+
+    v2.0.74 (caption/audio desync fix): this is intentionally NOT a
+    ``-ss + -c copy`` trim. Stream-copy can only start at a keyframe
+    at-or-BEFORE the requested start (up to a whole GOP earlier — ~2s typical
+    on YouTube, 10s+ on some HLS). ``-avoid_negative_ts make_zero`` then hid
+    the shift by re-basing the file's t=0 to that early keyframe, while
+    captions were rebased by the REQUESTED clip start — so every subtitle
+    appeared (clip_start − keyframe) seconds away from the actual speech
+    (the "caption/ucapan tidak sinkron, ada delay" report).
+
+    Decoding with ``-ss`` is frame-accurate, and re-encoding naturally writes
+    0-based timestamps, so the section starts EXACTLY at clip_start with
+    audio, video and later-rendered captions sharing the same t=0. The audio
+    is re-encoded (not copied) so its timestamps are normalized together with
+    the video. A video-only source (SABR/240p) is handled with ``-an``.
+
+    If a hardware encoder was requested and fails at runtime, retries once
+    with CPU libx264 so the clip still completes.
+    """
+    log = log or debug_log
+    import shutil
+    import subprocess
+    import sys
+
+    ffmpeg_path = get_ffmpeg_path()
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+    log("Cutting downloaded video to requested section (exact start, re-encode)...")
+
+    # Probe the source for an audio stream (video-only downloads must not
+    # fail on `-c:a aac` when there is no audio input).
+    probe = subprocess.run(
+        [str(ffmpeg_path), "-hide_banner", "-i", str(full_path)],
+        capture_output=True, creationflags=flags,
+    )
+    has_audio = b"Audio:" in (probe.stderr or b"")
+
+    if gpu_config and gpu_config.get("available"):
+        log(f"Cut encode: GPU {gpu_config.get('name')} (preset={gpu_config.get('preset')})")
+        video_enc_args = build_video_enc_args(gpu_config)
+    else:
+        log("Cut encode: CPU libx264 (ultrafast)")
+        video_enc_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"]
+    audio_args = ["-c:a", "aac", "-b:a", "192k"] if has_audio else ["-an"]
+
+    def run_cut(enc_args: list[str], audio: list[str], tag: str) -> str:
+        cut_output = output_path + ".cut.mp4"
+        cmd = [
+            str(ffmpeg_path), "-y",
+            "-ss", start_time,
+            "-to", end_time,
+            "-i", str(full_path),
+            *enc_args,
+            "-pix_fmt", "yuv420p",
+            *audio,
+            str(cut_output),
+        ]
+        log(f"Cut ({tag}): {start_time} -> {end_time}")
+        result = subprocess.run(cmd, capture_output=True, text=True, creationflags=flags)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to cut video section with ffmpeg: {result.stderr[:600]}"
+            )
+        shutil.move(cut_output, output_path)
+        return output_path
+
+    try:
+        return run_cut(video_enc_args, audio_args, "primary")
+    except Exception:
+        if gpu_config and gpu_config.get("available"):
+            log("⚠️ Hardware cut encode failed — retrying once with CPU libx264")
+            return run_cut(
+                ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"],
+                audio_args, "CPU fallback",
+            )
+        raise
+
+
 def download_video_section(
     url: str,
     start_time: str,
@@ -269,6 +357,7 @@ def download_video_section(
     output_path: str,
     log: LogFn | None = None,
     max_height: int = 1080,
+    gpu_config: dict[str, Any] | None = None,
 ) -> str:
     """Download a specific section of a YouTube video.
 
@@ -283,7 +372,9 @@ def download_video_section(
     end_clean = end_time.replace(",", ".")
 
     if is_ytdlp_module_available():
-        return _download_section_module(url, start_clean, end_clean, output_path, log, max_height)
+        return _download_section_module(
+            url, start_clean, end_clean, output_path, log, max_height, gpu_config
+        )
     else:
         raise RuntimeError(
             "yt-dlp Python module is required for downloading video sections. "
@@ -298,6 +389,7 @@ def _download_section_module(
     output_path: str,
     log: LogFn,
     max_height: int = 1080,
+    gpu_config: dict[str, Any] | None = None,
 ) -> str:
     import yt_dlp
 
@@ -529,34 +621,20 @@ def _download_section_module(
             dl_thread.join(timeout=5)
 
     def _cut_section(full_path: str) -> str:
-        """Cut a full downloaded video to [start_time, end_time] with ffmpeg.
+        """Cut a full downloaded video to [start_time, end_time].
 
-        Local-only operation, no network. `-c copy` avoids re-encoding (also
-        means NO GPU/CPU encode cost here — the earlier section-download video
-        was never re-encoded, only trimmed).
+        v2.0.74: delegates to the module-level ACCURATE RE-ENCODE cut (the
+        old ``-ss + -c copy`` trim started at a keyframe before the requested
+        start, shifting caption timing vs the speech — see
+        ``cut_video_section`` docstring). The section is 720p-capped so the
+        extra encode is cheap; the portrait stage re-encodes it anyway.
         """
         stop_evt.set()  # download phase done — stop the heartbeat thread
         log("Cutting downloaded video to requested section...")
-        cut_output = output_path + ".cut.mp4"
-        ffmpeg_path = get_ffmpeg_path()
-        cut_cmd = [
-            str(ffmpeg_path), "-y",
-            "-ss", start_time,
-            "-to", end_time,
-            "-i", full_path,
-            "-c", "copy",
-            "-avoid_negative_ts", "make_zero",
-            str(cut_output),
-        ]
-        import subprocess
-        import sys
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        result = subprocess.run(cut_cmd, capture_output=True, text=True, creationflags=flags)
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to cut video section with ffmpeg: {result.stderr[:500]}")
-        import shutil
-        shutil.move(cut_output, output_path)
-        return output_path
+        return cut_video_section(
+            full_path, output_path, start_time, end_time,
+            log=log, gpu_config=gpu_config,
+        )
 
     def _do_download() -> str:
         """Primary: full native parallel download + local cut → fallback.
