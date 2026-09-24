@@ -53,6 +53,34 @@ def _words_for_clip(
     return sliced
 
 
+def _resolve_gpu_config(gpu_config: dict[str, Any] | None, log: LogFn) -> dict[str, Any] | None:
+    """Ensure an enabled GPU config carries an encoder.
+
+    Older builds saved only ``{"enabled": true}`` — no encoder/preset — so the
+    backend saw ``encoder=None`` and silently encoded with libx264 (CPU). If
+    enabled but missing an encoder, re-detect once at runtime so existing users
+    get hardware encoding without re-toggling the setting.
+    """
+    if not gpu_config or not gpu_config.get("enabled") or gpu_config.get("encoder"):
+        return gpu_config
+    try:
+        from .gpu import detect_gpu
+        det = detect_gpu()
+        enc = (det or {}).get("encoder") or {}
+        if enc.get("available") and enc.get("name"):
+            resolved = {
+                "enabled": True,
+                "encoder": enc["name"],
+                "preset": enc.get("preset"),
+            }
+            log(f"GPU config missing encoder — resolved: {enc['name']} (preset={enc.get('preset')})")
+            return resolved
+        log("GPU acceleration enabled but no encoder available — falling back to CPU")
+    except Exception as e:
+        log(f"GPU re-detect failed ({e}) — falling back to CPU")
+    return gpu_config
+
+
 def _run_portrait(input_path: str, output_path: str, options: dict[str, Any], log: LogFn, gpu_config: dict[str, Any] | None = None) -> str:
     """Run portrait conversion — face-tracked or centered, based on reframeMode."""
     reframe_mode = options.get("reframeMode", "face")
@@ -76,7 +104,7 @@ def process_selected_highlights(
                   gpuAcceleration (optional, for hardware encoding)
     ai keys: api_key, base_url, model, hook_style (dict, includes duration_seconds)
     """
-    gpu_config = options.get("gpuAcceleration")
+    gpu_config = _resolve_gpu_config(options.get("gpuAcceleration"), log)
     session_path = Path(session_dir)
     clips_dir = session_path / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
@@ -180,24 +208,22 @@ def process_selected_highlights(
             log(f"[{i}/{total}] Split-screen mode: reframing main video to portrait pane (face tracking)...")
             pane_path = str(temp_dir / f"split_pane_top_{i:03d}.mp4")
             top_h = int(round(OUTPUT_HEIGHT * split_top_ratio))
-            # Convert main video to portrait pane (top)
+            # Convert main video to portrait pane (top) — face-tracked reframe,
+            # encoded with the same GPU encoder as the rest of the pipeline.
             video_path = convert_to_portrait_pane(
                 video_path, pane_path,
                 output_height=top_h,
                 log=lambda m: log(f"[{i}/{total}] {m}"),
+                gpu_config=gpu_config,
             )
-            # Convert second (webcam) video to portrait pane (bottom)
-            bottom_path = str(temp_dir / f"split_pane_bottom_{i:03d}.mp4")
+            # Bottom pane stays LANDSCAPE: the raw webcam/local file goes straight
+            # to combine_split_screen, which cover-crops it into a 1080x{bottom_h}
+            # landscape strip (no portrait reframe — phones/webcams feed natively).
             bottom_h = OUTPUT_HEIGHT - top_h
-            video_path_bottom = convert_to_portrait(
-                split_webcam_path, bottom_path,
-                output_height=bottom_h,
-                log=lambda m: log(f"[{i}/{total}] {m}"),
-            )
-            log(f"[{i}/{total}] Split-screen both panes ready — stacking portrait top and bottom (each {split_top_ratio:.0%}/{1 - split_top_ratio:.0%})")
+            log(f"[{i}/{total}] Split-screen: top portrait (face tracking) {split_top_ratio:.0%} + bottom landscape {1 - split_top_ratio:.0%} — stacking")
             video_path = combine_split_screen(
                 main_video_path=video_path,
-                second_video_path=video_path_bottom,
+                second_video_path=split_webcam_path,
                 output_path=portrait_path,
                 top_ratio=split_top_ratio,
                 main_volume=split_main_volume,
