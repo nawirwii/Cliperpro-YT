@@ -68,7 +68,7 @@ export function Sidebar() {
           </div>
           {!sidebarCollapsed && (
             <span className="text-sm font-semibold text-[var(--color-text-primary)] whitespace-nowrap">
-              YT Short Clipper
+              Cliperpro
             </span>
           )}
         </div>
