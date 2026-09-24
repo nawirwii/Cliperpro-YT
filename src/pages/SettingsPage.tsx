@@ -45,7 +45,14 @@ export function SettingsPage() {
   const handleToggle = async (next: boolean) => {
     setSaving(true);
     try {
-      await setGpuAcceleration(next);
+      // Persist the detected encoder + preset alongside enabled — the sidecar
+      // needs them to build ffmpeg args. Saving only { enabled: true } made the
+      // backend fall back to libx264 (CPU) even though the toggle was on.
+      await setGpuAcceleration({
+        enabled: next,
+        encoder: next ? detection?.encoder.name ?? null : null,
+        preset: next ? detection?.encoder.preset ?? null : null,
+      });
       toast.success(next ? "GPU acceleration enabled" : "GPU acceleration disabled");
     } catch {
       toast.error("Failed to save setting");
