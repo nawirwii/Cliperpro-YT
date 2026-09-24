@@ -133,10 +133,14 @@ export function ProcessingClipsPage() {
           const encMatch = m.match(/encoding portrait:\s*(\d+)%/);
           if (encMatch) {
             const encPct = Number(encMatch[1]);
-            if (encPct > 0) {
+            // Read highlights fresh from the store: the closure captured the
+            // pre-start empty array, which made this division NaN (progress
+            // showed "NaN%" until the first clip saved).
+            const hlsLen = useProcessingClipsStore.getState().highlights.length;
+            if (encPct > 0 && hlsLen > 0) {
               // Map encoding progress to overall progress (0-90% for encoding, rest for other steps)
               // Assuming encoding is the bulk of work, cap at 90% until clip saved
-              const overall = Math.min(90, Math.round((completedClips / highlights.length) * 90) + Math.round((encPct / 100) * (90 / highlights.length)));
+              const overall = Math.min(90, Math.round((completedClips / hlsLen) * 90) + Math.round((encPct / 100) * (90 / hlsLen)));
               st.setProgress(overall);
             }
           }
