@@ -48,6 +48,10 @@ export interface AppConfig {
   ai: AIProviderSettings;
   gpuAcceleration: {
     enabled: boolean;
+    /** FFmpeg hardware encoder name (e.g. h264_qsv), saved when enabled. */
+    encoder?: string | null;
+    /** Encoder preset (e.g. "faster"), saved when enabled. */
+    preset?: string | null;
   };
   watermark: WatermarkSettings;
   creditWatermark: CreditWatermarkSettings;
@@ -66,6 +70,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   gpuAcceleration: {
     enabled: false,
+    encoder: null,
+    preset: null,
   },
   watermark: {
     enabled: false,
