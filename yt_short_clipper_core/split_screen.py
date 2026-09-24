@@ -220,7 +220,7 @@ def combine_split_screen(
     # with a frame pool. Other HW encoders (nvenc/amf) accept CPU frames
     # directly and keep the plain yuv420p graph.
     #
-    # We try TWO QSV pipelines before falling back to CPU, because the
+    # We try THREE QSV pipelines before falling back to CPU, because the
     # gpu.py runtime probe (which the app ran at startup and which SUCCEEDED
     # on this machine) uses a different shape than the vstack pipeline:
     #   1. "hwupload": canonical vstack fix — graph ends in
@@ -229,10 +229,19 @@ def combine_split_screen(
     #      explicit device flags, NO hwupload in the graph; h264_qsv does the
     #      upload internally. This mirrors the command that already works on
     #      the user's GPU.
+    #   3. "mf": Windows Media Foundation encoder (h264_mf) — a completely
+    #      different hardware pipeline that does NOT depend on the Intel QSV
+    #      driver (some iGPU drivers reject BOTH qsv shapes on a complex
+    #      vstack graph at frame=0 with "one of its streams received no
+    #      packets", even though the simple startup probe passes).
     # The first pipeline that completes is remembered for the rest of the
     # process (_qsv_pipeline), so a multi-clip session never re-tries a
     # pipeline that already proved broken on this machine.
     is_qsv = enc_name == "h264_qsv"
+    # h264_mf exists only in FFmpeg builds with Media Foundation (Windows).
+    # The encoder accepts CPU frames (yuv420p) and converts internally — no
+    # hw device flags and no hwupload needed.
+    is_mf_available = sys.platform == "win32"
     qsv_graph = list(filter_parts)
     cpu_graph = list(filter_parts)
     if is_qsv:
@@ -270,27 +279,41 @@ def combine_split_screen(
     # (pipeline=hwupload)" / "(pipeline=probe-style)" so the user can see
     # which exact command shape succeeded on their hardware.
     qsv_head = ["-init_hw_device", "qsv=hw", "-filter_hw_device", "hw"]
+    # h264_mf: Windows Media Foundation hardware encoder. No hw device, no
+    # hwupload — plain CPU yuv420p graph, MF converts internally. Uses an
+    # explicit bitrate because the MF encoder has no usable preset/cq knobs.
+    mf_enc_args = ["-c:v", "h264_mf", "-b:v", "5M"]
     attempts: list[tuple[str, list[str], list[str], list[str]]] = []
     if is_qsv:
         if _qsv_pipeline == "hwupload":
             attempts = [("hwupload", qsv_head, qsv_graph, video_enc_args)]
         elif _qsv_pipeline == "probe-style":
             attempts = [("probe-style", qsv_head, cpu_graph, video_enc_args)]
+        elif _qsv_pipeline == "mf":
+            if is_mf_available:
+                attempts = [("mf", [], cpu_graph, mf_enc_args)]
+            else:
+                attempts = []
         else:
             attempts = [
                 ("hwupload", qsv_head, qsv_graph, video_enc_args),
                 ("probe-style", qsv_head, cpu_graph, video_enc_args),
             ]
+            if is_mf_available:
+                attempts.append(("mf", [], cpu_graph, mf_enc_args))
     else:
         attempts = [("direct", [], cpu_graph, video_enc_args)]
 
     result = None
+    winner_label: str | None = None
     for label, head, graph, enc_args in attempts:
         cmd = build_video_cmd(head, graph, enc_args)
         result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS)
         if result.returncode == 0:
+            winner_label = label
             if enc_name and label != "direct":
-                log(f"Using GPU encoder: {enc_name} (pipeline={label})")
+                shown_name = "h264_mf" if label == "mf" else enc_name
+                log(f"Using GPU encoder: {shown_name} (pipeline={label})")
             break
         log(f"⚠️ GPU pipeline '{label}' failed — {(result.stderr or '').strip()[-200:]}")
 
@@ -313,12 +336,12 @@ def combine_split_screen(
         raise RuntimeError(f"Split screen composition failed: {(result.stderr if result else '')[-500:]}")
 
     # Remember which QSV pipeline worked so later clips skip the broken one.
+    # Only the pipeline that ACTUALLY produced the successful result counts —
+    # checking `result.returncode` against every label would cache the FIRST
+    # attempt even when a later one was the real winner.
     if is_qsv and enc_name and _qsv_pipeline is None:
-        for label, head, graph, enc_args in attempts:
-            # The pipeline that produced result (returncode==0) is the winner.
-            if result.returncode == 0 and label in ("hwupload", "probe-style"):
-                _qsv_pipeline = label
-                break
+        if winner_label in ("hwupload", "probe-style", "mf"):
+            _qsv_pipeline = winner_label
 
     log("Split screen composition complete")
     return output_path

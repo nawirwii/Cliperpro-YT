@@ -35,15 +35,90 @@ OUTPUT_HEIGHT = 1920
 ENCODE_STALL_TIMEOUT_S = 300
 
 # --- Reframe tracking tuning ---
-EMA_ALPHA = 0.15          # how fast the crop follows the target (higher = snappier)
 DEADZONE_FRAC = 0.02      # ignore target moves smaller than this * crop_w (anti-jitter)
 SNAP_FRAC = 0.35          # target jump larger than this * crop_w = scene cut, snap instantly
 CONTINUITY_WEIGHT = 0.4   # penalty for choosing a face far from the current crop (subject stickiness)
 SPEAKER_BONUS = 2.0       # how much active speaking boosts a face's selection score
 MIN_SPEAK_RATIO = 0.18    # (mouth opening / face height) above this counts as "speaking"
 
-# Lip landmark indices for mouth openness
+# One-Euro filter (adaptive smoothing) replaces the fixed EMA_ALPHA for crop
+# tracking: the cutoff frequency grows with face velocity, so the crop stays
+# rock-steady while the face is still yet still follows fast moves without lag.
+ONE_EURO_MIN_CUTOFF = 1.2   # Hz — lower = smoother when idle
+ONE_EURO_BETA = 0.05        # velocity gain — higher = snappier on fast moves
+ONE_EURO_DERIV_CUTOFF = 1.0 # Hz — derivative smoothing
+
+# Lip landmark indices for mouth openness (fallback when blendshapes are off)
 LIP_INDICES = {13, 14, 78, 81, 82, 84, 87, 88, 95, 146, 178, 181, 185, 191, 308, 312, 317, 318, 324, 375, 402, 405, 409, 415}
+
+
+def _face_bbox(landmarks, w_img: float, h_img: float) -> tuple[float, float, float]:
+    """Bounding box of one MediaPipe face: (centre_x, width, height) in pixels."""
+    xs = [lm.x * w_img for lm in landmarks]
+    ys = [lm.y * h_img for lm in landmarks]
+    fx_min, fx_max = min(xs), max(xs)
+    fy_min, fy_max = min(ys), max(ys)
+    face_cx = (fx_min + fx_max) / 2.0
+    return face_cx, max(fx_max - fx_min, 1.0), max(fy_max - fy_min, 1.0)
+
+
+def _speak_openness(landmarks, h_img: float, blendshapes=None) -> float:
+    """Speaking activity 0..1 for one face.
+
+    Prefers the ARKit ``jawOpen`` blendshape (computed from the 3D face model,
+    rotation-invariant and far more precise than 2D lip landmarks) when the
+    landmarker produced blendshapes; falls back to the 2D lip-opening ratio.
+    """
+    if blendshapes:
+        for cat in blendshapes:
+            if getattr(cat, "category_name", "") == "jawOpen":
+                try:
+                    return float(getattr(cat, "score", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    return 0.0
+    lip_ys = [lm.y * h_img for i, lm in enumerate(landmarks) if i in LIP_INDICES]
+    if len(lip_ys) < 2:
+        return 0.0
+    fy_min = min(lm.y for lm in landmarks) * h_img
+    fy_max = max(lm.y for lm in landmarks) * h_img
+    face_h = max(fy_max - fy_min, 1.0)
+    return (max(lip_ys) - min(lip_ys)) / face_h
+
+
+def _face_selection_score(
+    face_w: float, orig_w: float, openness: float,
+    face_cx: float, smoothed_cx: float,
+) -> float:
+    """Score how likely this face is the primary subject: prominence (size),
+    speaking activity (jawOpen / lip openness), and continuity with the
+    current crop. No hard gate on speaking — a face is always tracked."""
+    speak_term = openness if openness > MIN_SPEAK_RATIO else 0.0
+    size_term = face_w / orig_w
+    cont_term = abs(face_cx - smoothed_cx) / orig_w
+    return size_term * (1.0 + SPEAKER_BONUS * speak_term) - CONTINUITY_WEIGHT * cont_term
+
+
+def _one_euro(
+    prev_value: float, target: float, prev_deriv: float, dt: float,
+    min_cutoff: float, beta: float, deriv_cutoff: float,
+) -> tuple[float, float]:
+    """1-D One-Euro filter. Returns ``(filtered_value, filtered_derivative)``.
+
+    Adaptive smoothing: when the target is moving fast the derivative raises
+    the cutoff (less lag); when it is still the cutoff drops to ``min_cutoff``
+    (very smooth, kills jitter).
+    """
+    if dt <= 0:
+        return target, 0.0
+    tau = 1.0 / (2.0 * 3.141592653589793 * min_cutoff)
+    cutoff = min_cutoff + beta * abs(prev_deriv)
+    alpha = 1.0 / (1.0 + tau / dt)
+    filtered = alpha * target + (1.0 - alpha) * prev_value
+    deriv = (filtered - prev_value) / dt
+    tau_d = 1.0 / (2.0 * 3.141592653589793 * deriv_cutoff)
+    alpha_d = 1.0 / (1.0 + tau_d / dt)
+    deriv_filtered = alpha_d * deriv + (1.0 - alpha_d) * prev_deriv
+    return filtered, deriv_filtered
 
 
 def convert_to_portrait(
@@ -85,7 +160,9 @@ def convert_to_portrait(
         base_options=base_options,
         running_mode=vision.RunningMode.VIDEO,
         num_faces=10,
-        min_face_detection_confidence=0.35,
+        min_face_detection_confidence=0.5,
+        min_tracking_confidence=0.7,
+        output_face_blendshapes=True,
     )
     face_landmarker = vision.FaceLandmarker.create_from_options(options)
 
@@ -95,11 +172,13 @@ def convert_to_portrait(
     half_w = crop_w / 2.0
     max_x = max(0, orig_w - crop_w)
     smoothed_cx = orig_w / 2.0          # current crop centre (smoothed)
+    deriv_cx = 0.0                      # One-Euro derivative state (px/s)
     last_face_cx: float | None = None   # last centre we actually saw a face at
     no_face_frames = 0                  # diagnostic: frames where no face was detected
 
     deadzone = DEADZONE_FRAC * crop_w
     snap_dist = SNAP_FRAC * crop_w
+    dt = 1.0 / fps if fps > 0 else 1.0 / 30.0
 
     cap = cv2.VideoCapture(input_path)
     frame_idx = 0
@@ -125,23 +204,13 @@ def convert_to_portrait(
             # Pick the primary subject every frame by scoring each face on
             # prominence (size), speaking activity, and continuity with the
             # current crop. No hard gate on speaking -> the face is always tracked.
+            blendshapes_list = results.face_blendshapes or []
             best_score = -1e9
-            for landmarks in results.face_landmarks:
-                xs = [lm.x * w_img for lm in landmarks]
-                ys = [lm.y * h_img for lm in landmarks]
-                fx_min, fx_max = min(xs), max(xs)
-                fy_min, fy_max = min(ys), max(ys)
-                face_cx = (fx_min + fx_max) / 2.0
-                face_w = max(fx_max - fx_min, 1.0)
-                face_h = max(fy_max - fy_min, 1.0)
-
-                lip_ys = [lm.y * h_img for i, lm in enumerate(landmarks) if i in LIP_INDICES]
-                openness_ratio = (max(lip_ys) - min(lip_ys)) / face_h if len(lip_ys) >= 2 else 0.0
-                speak_term = openness_ratio if openness_ratio > MIN_SPEAK_RATIO else 0.0
-
-                size_term = face_w / orig_w
-                cont_term = abs(face_cx - smoothed_cx) / orig_w
-                score = size_term * (1.0 + SPEAKER_BONUS * speak_term) - CONTINUITY_WEIGHT * cont_term
+            for i, landmarks in enumerate(results.face_landmarks):
+                face_cx, face_w, face_h = _face_bbox(landmarks, w_img, h_img)
+                blends = blendshapes_list[i] if i < len(blendshapes_list) else None
+                openness = _speak_openness(landmarks, h_img, blends)
+                score = _face_selection_score(face_w, orig_w, openness, face_cx, smoothed_cx)
 
                 if score > best_score:
                     best_score = score
@@ -154,12 +223,18 @@ def convert_to_portrait(
             target_cx = last_face_cx if last_face_cx is not None else orig_w / 2.0
 
         # Smooth the crop towards the target, snapping on big jumps (cuts /
-        # speaker switches) and ignoring tiny moves (anti-jitter).
+        # speaker switches) and ignoring tiny moves (anti-jitter). In between,
+        # One-Euro filtering replaces the old fixed EMA: the cutoff adapts to
+        # face velocity so still faces are rock-steady and fast moves keep up.
         delta = target_cx - smoothed_cx
         if abs(delta) > snap_dist:
             smoothed_cx = target_cx
+            deriv_cx = 0.0
         elif abs(delta) > deadzone:
-            smoothed_cx += EMA_ALPHA * delta
+            smoothed_cx, deriv_cx = _one_euro(
+                smoothed_cx, target_cx, deriv_cx, dt,
+                ONE_EURO_MIN_CUTOFF, ONE_EURO_BETA, ONE_EURO_DERIV_CUTOFF,
+            )
 
         x = int(round(smoothed_cx - half_w))
         x = max(0, min(x, max_x))
