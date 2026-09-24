@@ -90,7 +90,7 @@ export const useProcessingClipsStore = create<ProcessingClipsState>((set) => ({
     }),
 
   setStep: (step) => set({ currentStep: step }),
-  setProgress: (p) => set({ progress: p }),
+  setProgress: (p) => set({ progress: Number.isFinite(p) ? p : 0 }),
   setActive: (active) => set({ active }),
   setComplete: () => set({ isComplete: true, active: false, progress: 100 }),
   setError: (err) => set({ error: err, active: false }),
