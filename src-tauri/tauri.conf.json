@@ -1,7 +1,7 @@
 {
   "identifier": "com.jipraks.ytshortclipper-v2",
 
-  "version": "2.0.65",
+  "version": "2.0.66",
 
   "build": {
     "frontendDist": "../dist",
@@ -10,7 +10,7 @@
   "app": {
     "windows": [
       {
-        "title": "YT Short Clipper v2",
+        "title": "Cliperpro",
         "width": 960,
         "height": 680,
         "resizable": true,
