@@ -157,17 +157,26 @@ def combine_split_screen(
             "[top][bottom]vstack=inputs=2,format=yuv420p[v]",
         ]
 
+    audio_filter = None
     if main_has_audio and second_has_audio:
-        filter_parts.append(f"[0:a]volume={main_volume:.2f},aresample=48000[a0];[1:a]volume={second_volume:.2f},aresample=48000[a1];[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0[a]")
+        filter_parts.append(
+            f"[0:a]volume={main_volume:.2f},aresample=48000[a0];"
+            f"[1:a]volume={second_volume:.2f},aresample=48000[a1];"
+            f"[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0[a]"
+        )
         audio_map = ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
     elif main_has_audio:
-        filter_parts.append(f"[0:a]volume={main_volume:.2f},aresample=48000,anull[a]")
-        audio_map = ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        # Direct map (no filtergraph audio): a missing/empty second stream
+        # can't starve a mapped label and trigger "Could not open encoder
+        # before EOF" / zero-packet output.
+        audio_map = ["-map", "0:a", "-c:a", "aac", "-b:a", "192k"]
+        audio_filter = f"volume={main_volume:.2f}"
     elif second_has_audio:
-        filter_parts.append(f"[1:a]volume={second_volume:.2f},aresample=48000,anull[a]")
-        audio_map = ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        audio_map = ["-map", "1:a", "-c:a", "aac", "-b:a", "192k"]
+        audio_filter = f"volume={second_volume:.2f}"
     else:
         audio_map = ["-an"]
+        audio_filter = None
 
     # Select video encoder based on GPU config
     gpu_enabled = gpu_config and gpu_config.get("enabled", False) if gpu_config else False
@@ -200,6 +209,10 @@ def combine_split_screen(
         "-filter_complex", ";".join(filter_parts),
         "-map", "[v]",
         *audio_map,
+    ]
+    if audio_filter:
+        cmd += ["-af", audio_filter, "-ar", "48000"]
+    cmd += [
         *video_enc_args,
         "-t", f"{main_dur:.3f}",
         "-movflags", "+faststart",

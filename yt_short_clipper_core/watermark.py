@@ -151,6 +151,10 @@ def apply_watermark(
         opacity = credit_watermark.get("opacity", 0.7)
         pos_x = credit_watermark.get("position_x", 0.03)
         pos_y = credit_watermark.get("position_y", 0.92)
+        # Nawir: keep the credit above the bottom UI-button row so it isn't
+        # clipped/overlap by on-screen controls (0.92 sits too close to edge).
+        if pos_y > 0.9:
+            pos_y = 0.85
 
         # Convert hex color to ffmpeg format (remove #)
         ff_color = color.lstrip("#")
@@ -175,7 +179,7 @@ def apply_watermark(
             f"text='{escaped_display}':"
             f"fontsize={font_size}:"
             f"fontcolor=0x{ff_color}{alpha_hex}{fontfile_part}:"
-            f"x=w*{pos_x}:y=h*{pos_y}:"
+            f"x=main_w*{pos_x}:y=main_h*{pos_y}:"
             f"box=1:boxcolor=black@0.5:boxborderw=5:"
             f"shadowcolor=black@0.5:shadowx=1:shadowy=1"
         )
