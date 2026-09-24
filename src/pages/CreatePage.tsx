@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clipboard, Play, CirclePlay, Cookie, CheckCircle2, Loader2, ExternalLink, Captions, CaptionsOff, Wand2, ChevronDown } from "lucide-react";
+import { Clipboard, Play, CirclePlay, Cookie, CheckCircle2, Loader2, ExternalLink, Captions, CaptionsOff, Wand2, ChevronDown, FileVideo, Upload } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -59,6 +60,9 @@ export function CreatePage() {
   const { config, loaded: configLoaded, load: loadConfig } = useConfigStore();
 
   const [url, setUrl] = useState("");
+  const [source, setSource] = useState<"youtube" | "local">("youtube");
+  const [localPath, setLocalPath] = useState("");
+  const [localFileName, setLocalFileName] = useState("");
   const [clipCount, setClipCount] = useState(5);
   const [subtitleLang, setSubtitleLang] = useState("");
   const [showCookiesDialog, setShowCookiesDialog] = useState(false);
@@ -144,9 +148,31 @@ export function CreatePage() {
   }, [videoId, cookiesValid, url]);
 
   const subtitlesReady = subtitleState === "loaded" && subtitleLang !== "";
-  const isValid = !!videoId && cookiesValid && subtitlesReady;
+  const youtubeValid = !!videoId && cookiesValid && subtitlesReady;
+  const localValid = !!localPath.trim();
+  const isValid = source === "local" ? localValid : youtubeValid;
 
   const trimmedDirection = userDirection.trim();
+
+  const handlePickLocal = useCallback(async () => {
+    try {
+      const selected = await openDialog({
+        multiple: false,
+        title: "Pilih video lokal",
+        filters: [
+          { name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "avi", "m4v", "mpg", "mpeg"] },
+          { name: "Semua file", extensions: ["*"] },
+        ],
+      });
+      if (typeof selected === "string" && selected) {
+        setLocalPath(selected);
+        setLocalFileName(selected.split(/[\\/]/).pop() ?? selected);
+      }
+    } catch (err) {
+      console.error("Failed to pick local video", err);
+      toast.error("Gagal memilih file video");
+    }
+  }, []);
 
   // What "Auto" resolves to, so the choice is visible before running.
   const autoLanguageName = languageNameForCode(subtitleLang.split(":")[0]);
@@ -168,6 +194,33 @@ export function CreatePage() {
   }, []);
 
   const handleStart = () => {
+    if (source === "local") {
+      if (!isValid) return;
+      const hf = config.ai;
+      if (!configLoaded || !hf.apiKey.trim() || !hf.model.trim()) {
+        toast.error("Configure the AI provider first");
+        navigate("/ai-models");
+        return;
+      }
+      start({
+        url: "",
+        source: "local",
+        localPath: localPath.trim(),
+        numClips: clipCount,
+        subtitleLanguage: "transcribed",
+        userDirection: trimmedDirection || undefined,
+        outputLanguage,
+        ai: {
+          api_key: hf.apiKey,
+          base_url: hf.baseUrl,
+          model: hf.model,
+          system_message: hf.systemMessage,
+        },
+      });
+      navigate("/processing");
+      return;
+    }
+
     if (!cookiesValid) {
       setShowCookiesDialog(true);
       return;
@@ -223,23 +276,73 @@ export function CreatePage() {
 
   return (
     <div className="space-y-5">
-      {/* URL Input */}
-      <div className="flex gap-2">
-        <Input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="YouTube URL"
-          className="flex-1 h-12 text-base rounded-[var(--radius)] border-[var(--color-border)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-sm)]"
-        />
-        <Button
-          variant="outline"
-          onClick={handlePaste}
-          className="h-12 px-4 gap-2 rounded-[var(--radius)] shadow-[var(--shadow-sm)]"
+      {/* Source toggle: YouTube link or local file upload */}
+      <div className="grid grid-cols-2 gap-2 p-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+        <button
+          type="button"
+          onClick={() => setSource("youtube")}
+          className={cn(
+            "flex items-center justify-center gap-2 h-11 rounded-[var(--radius-sm)] text-sm font-semibold transition-colors cursor-pointer",
+            source === "youtube"
+              ? "bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-[var(--shadow-sm)]"
+              : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+          )}
         >
-          <Clipboard className="w-4 h-4" />
-          Paste
-        </Button>
+          <Play className="w-4 h-4" />
+          Link YouTube
+        </button>
+        <button
+          type="button"
+          onClick={() => setSource("local")}
+          className={cn(
+            "flex items-center justify-center gap-2 h-11 rounded-[var(--radius-sm)] text-sm font-semibold transition-colors cursor-pointer",
+            source === "local"
+              ? "bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] shadow-[var(--shadow-sm)]"
+              : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+          )}
+        >
+          <FileVideo className="w-4 h-4" />
+          File Lokal
+        </button>
       </div>
+
+      {/* Source input */}
+      {source === "youtube" ? (
+        <div className="flex gap-2">
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="YouTube URL"
+            className="flex-1 h-12 text-base rounded-[var(--radius)] border-[var(--color-border)] bg-[var(--color-bg-primary)] shadow-[var(--shadow-sm)]"
+          />
+          <Button
+            variant="outline"
+            onClick={handlePaste}
+            className="h-12 px-4 gap-2 rounded-[var(--radius)] shadow-[var(--shadow-sm)]"
+          >
+            <Clipboard className="w-4 h-4" />
+            Paste
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={handlePickLocal}
+          className="w-full p-5 rounded-[var(--radius)] border-2 border-dashed border-[var(--color-border)] hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-light)] transition-colors cursor-pointer"
+        >
+          <div className="flex flex-col items-center gap-2.5 text-center">
+            <Upload className="w-8 h-8 text-[var(--color-accent)]" />
+            <span className="text-sm font-medium text-[var(--color-text-primary)]">
+              {localFileName ? "Ganti file video" : "Pilih video dari lokal media"}
+            </span>
+            <span className="text-xs text-[var(--color-text-muted)]">
+              {localFileName
+                ? localFileName
+                : "MP4, MOV, MKV, WEBM, AVI, M4V — audio akan ditranskripsi otomatis untuk deteksi highlight"}
+            </span>
+          </div>
+        </button>
+      )}
 
       {/* Main content: Clip Parameters + Thumbnail */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -249,60 +352,71 @@ export function CreatePage() {
             <CardTitle>Clip Parameters</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            {/* Subtitle Language */}
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-secondary)]">
-                Subtitle Language:
-                {subtitleState === "loading" && (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-accent)]" />
-                )}
-              </label>
-              <select
-                value={subtitleLang}
-                onChange={(e) => setSubtitleLang(e.target.value)}
-                disabled={subtitleState !== "loaded"}
-                className="w-full h-10 px-3 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-input)] text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {subtitleState === "loaded" ? (
-                  subtitleOptions.map((opt) => (
-                    <option key={`${opt.code}:${opt.type}`} value={`${opt.code}:${opt.type}`}>
-                      {opt.code} - {opt.name}
-                      {opt.type === "auto" ? " (auto)" : ""}
+            {/* Subtitle Language (YouTube only; local files are transcribed) */}
+            {source === "youtube" && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-secondary)]">
+                  Subtitle Language:
+                  {subtitleState === "loading" && (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-accent)]" />
+                  )}
+                </label>
+                <select
+                  value={subtitleLang}
+                  onChange={(e) => setSubtitleLang(e.target.value)}
+                  disabled={subtitleState !== "loaded"}
+                  className="w-full h-10 px-3 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-input)] text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {subtitleState === "loaded" ? (
+                    subtitleOptions.map((opt) => (
+                      <option key={`${opt.code}:${opt.type}`} value={`${opt.code}:${opt.type}`}>
+                        {opt.code} - {opt.name}
+                        {opt.type === "auto" ? " (auto)" : ""}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">
+                      {subtitleState === "idle" && "Paste a YouTube URL first"}
+                      {subtitleState === "loading" && "Loading subtitles..."}
+                      {subtitleState === "empty" && "No subtitles available"}
+                      {subtitleState === "error" && "Failed to load subtitles"}
                     </option>
-                  ))
-                ) : (
-                  <option value="">
-                    {subtitleState === "idle" && "Paste a YouTube URL first"}
-                    {subtitleState === "loading" && "Loading subtitles..."}
-                    {subtitleState === "empty" && "No subtitles available"}
-                    {subtitleState === "error" && "Failed to load subtitles"}
-                  </option>
+                  )}
+                </select>
+                {subtitleState === "loaded" && (
+                  captionOrigCode ? (
+                    <p className="flex items-center gap-1.5 text-xs text-[var(--color-success)]">
+                      <Captions className="w-3.5 h-3.5 shrink-0" />
+                      Original subtitle available ({captionOrigCode}) — clips will get word-by-word captions
+                    </p>
+                  ) : (
+                    <p className="flex items-center gap-1.5 text-xs text-[var(--color-warning)]">
+                      <CaptionsOff className="w-3.5 h-3.5 shrink-0" />
+                      No original subtitle — clips will be created without captions
+                    </p>
+                  )
                 )}
-              </select>
-              {subtitleState === "loaded" && (
-                captionOrigCode ? (
-                  <p className="flex items-center gap-1.5 text-xs text-[var(--color-success)]">
-                    <Captions className="w-3.5 h-3.5 shrink-0" />
-                    Original subtitle available ({captionOrigCode}) — clips will get word-by-word captions
+                {subtitleState === "empty" && (
+                  <p className="text-xs text-[var(--color-warning)]">
+                    This video has no subtitles. Try another video.
                   </p>
-                ) : (
-                  <p className="flex items-center gap-1.5 text-xs text-[var(--color-warning)]">
-                    <CaptionsOff className="w-3.5 h-3.5 shrink-0" />
-                    No original subtitle — clips will be created without captions
+                )}
+                {subtitleState === "error" && (
+                  <p className="text-xs text-[var(--color-error)] whitespace-pre-line max-h-32 overflow-y-auto font-mono bg-[var(--color-error-bg)] rounded-[var(--radius-sm)] p-2">
+                    {subtitleError}
                   </p>
-                )
-              )}
-              {subtitleState === "empty" && (
-                <p className="text-xs text-[var(--color-warning)]">
-                  This video has no subtitles. Try another video.
-                </p>
-              )}
-              {subtitleState === "error" && (
-                <p className="text-xs text-[var(--color-error)] whitespace-pre-line max-h-32 overflow-y-auto font-mono bg-[var(--color-error-bg)] rounded-[var(--radius-sm)] p-2">
-                  {subtitleError}
-                </p>
-              )}
-            </div>
+                )}
+              </div>
+            )}
+            {source === "local" && (
+              <div className="flex items-start gap-2.5 text-xs text-[var(--color-text-secondary)] bg-[var(--color-bg-secondary)] border border-[var(--color-border-light)] rounded-[var(--radius-sm)] p-3">
+                <Captions className="w-4 h-4 shrink-0 text-[var(--color-accent)] mt-0.5" />
+                <span>
+                  Audio video akan <b>ditranskripsi otomatis</b> (Whisper via AI provider) untuk
+                  deteksi highlight. Captions klip memakai timing dari hasil transkripsi.
+                </span>
+              </div>
+            )}
 
             {/* Output Language */}
             <div className="space-y-2">
@@ -359,9 +473,25 @@ export function CreatePage() {
           </CardContent>
         </Card>
 
-        {/* Right: Thumbnail Preview */}
+        {/* Right: Thumbnail Preview (YouTube) / file info (local) */}
         <Card className="flex items-center justify-center min-h-[220px]">
-          {thumbnailUrl ? (
+          {source === "local" ? (
+            <div className="flex flex-col items-center gap-3 text-[var(--color-text-muted)] px-6 text-center">
+              <FileVideo className="w-12 h-12 opacity-40" />
+              {localFileName ? (
+                <>
+                  <span className="text-sm font-medium text-[var(--color-text-primary)] break-all">
+                    {localFileName}
+                  </span>
+                  <span className="text-xs text-[var(--color-text-muted)]">
+                    Sumber lokal — face tracking, captions, hook & watermark tetap jalan
+                  </span>
+                </>
+              ) : (
+                <span className="text-sm">Pilih file video lokal untuk diproses</span>
+              )}
+            </div>
+          ) : thumbnailUrl ? (
             <img
               src={thumbnailUrl}
               alt="Video thumbnail"
@@ -475,35 +605,37 @@ export function CreatePage() {
         )}
       </Card>
 
-      {/* Cookies Status */}
-      <div
-        className={`flex items-center justify-between p-3 rounded-[var(--radius-sm)] border cursor-pointer transition-all duration-200 ${
-          cookiesValid
-            ? "bg-[var(--color-success-bg)] border-[var(--color-success)]/30 text-[var(--color-success)]"
-            : "bg-[var(--color-warning-bg)] border-[var(--color-warning)]/30 text-[var(--color-warning)]"
-        }`}
-        onClick={() => setShowCookiesDialog(true)}
-      >
-        <div className="flex items-center gap-2 text-sm font-medium">
-          {cookiesValid ? (
-            <>
-              <CheckCircle2 className="w-4 h-4" />
-              <span>YouTube cookies loaded</span>
-            </>
-          ) : (
-            <>
-              <Cookie className="w-4 h-4" />
-              <span>Upload YouTube cookies to continue</span>
-            </>
-          )}
+      {/* Cookies Status (YouTube source only) */}
+      {source === "youtube" && (
+        <div
+          className={`flex items-center justify-between p-3 rounded-[var(--radius-sm)] border cursor-pointer transition-all duration-200 ${
+            cookiesValid
+              ? "bg-[var(--color-success-bg)] border-[var(--color-success)]/30 text-[var(--color-success)]"
+              : "bg-[var(--color-warning-bg)] border-[var(--color-warning)]/30 text-[var(--color-warning)]"
+          }`}
+          onClick={() => setShowCookiesDialog(true)}
+        >
+          <div className="flex items-center gap-2 text-sm font-medium">
+            {cookiesValid ? (
+              <>
+                <CheckCircle2 className="w-4 h-4" />
+                <span>YouTube cookies loaded</span>
+              </>
+            ) : (
+              <>
+                <Cookie className="w-4 h-4" />
+                <span>Upload YouTube cookies to continue</span>
+              </>
+            )}
+          </div>
+          <span className="text-xs underline">
+            {cookiesValid ? "Change" : "Upload"}
+          </span>
         </div>
-        <span className="text-xs underline">
-          {cookiesValid ? "Change" : "Upload"}
-        </span>
-      </div>
+      )}
 
       {/* Help link */}
-      {!cookiesValid && (
+      {source === "youtube" && !cookiesValid && (
         <button
           onClick={() => openUrl("https://github.com/jipraks/yt-short-clipper#youtube-cookies")}
           className="flex items-center gap-1 text-xs text-[var(--color-accent)] hover:underline"

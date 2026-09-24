@@ -9,6 +9,8 @@ export interface ClipLogLine {
 
 interface ClipSessionInput {
   url: string;
+  /** Local-file source path (uploaded sessions). */
+  localPath?: string;
   highlights: unknown[];
   sessionDir: string;
   options: ProcessOptions;
@@ -98,6 +100,7 @@ export const useProcessingClipsStore = create<ProcessingClipsState>((set) => ({
   reset: () =>
     set({
       url: "",
+      localPath: undefined,
       highlights: [],
       sessionDir: "",
       initialized: false,

@@ -44,6 +44,8 @@ export type ProcessClipsEvent = { type: "log"; message: string };
 
 export async function processClips(params: {
   url: string;
+  /** Local-file source path when the session came from an upload. */
+  localPath?: string;
   highlights: unknown[];
   sessionDir: string;
   options: ProcessOptions;
@@ -91,6 +93,7 @@ export async function processClips(params: {
 
   return invoke("process_clips", {
     url: params.url,
+    localPath: params.localPath?.trim() || null,
     highlights: params.highlights,
     sessionDir: params.sessionDir,
     options: params.options,

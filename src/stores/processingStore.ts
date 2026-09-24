@@ -13,7 +13,12 @@ export interface LogLine {
 }
 
 export interface FindHighlightsRequest {
+  /** YouTube URL (source = "youtube", default). */
   url: string;
+  /** Source mode: "youtube" (default) or "local". */
+  source?: "youtube" | "local";
+  /** Local file path when source = "local". */
+  localPath?: string;
   numClips: number;
   subtitleLanguage: string;
   ai: AIRequestSettings;
@@ -42,6 +47,11 @@ const DEFAULT_STEPS: Step[] = [
   { label: "Find highlights with AI", status: "pending" },
 ];
 
+const LOCAL_STEPS: Step[] = [
+  { label: "Transcribe local audio", status: "pending" },
+  { label: "Find highlights with AI", status: "pending" },
+];
+
 export const useProcessingStore = create<ProcessingState>((set) => ({
   isProcessing: false,
   steps: [...DEFAULT_STEPS],
@@ -52,7 +62,7 @@ export const useProcessingStore = create<ProcessingState>((set) => ({
   start: (request) =>
     set({
       isProcessing: true,
-      steps: DEFAULT_STEPS.map((s) => ({ ...s })),
+      steps: (request.source === "local" ? LOCAL_STEPS : DEFAULT_STEPS).map((s) => ({ ...s })),
       logLines: [],
       error: null,
       request,

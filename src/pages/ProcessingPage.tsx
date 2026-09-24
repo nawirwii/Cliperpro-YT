@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { useProcessingStore, type Step } from "@/stores/processingStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useAppStore } from "@/stores/appStore";
-import { findHighlights } from "@/hooks/highlights";
+import { findHighlights, findLocalHighlights } from "@/hooks/highlights";
 import { formatLogTime } from "@/utils/format";
 import { toast } from "sonner";
 
@@ -65,22 +65,39 @@ export function ProcessingPage() {
     appendLog({ level: "info", message: "Starting...", ts: Date.now() });
 
     try {
-      const session = await findHighlights({
-        url: request.url,
-        numClips: request.numClips,
-        subtitleLanguage: request.subtitleLanguage,
-        ai: request.ai,
-        userDirection: request.userDirection,
-        outputLanguage: request.outputLanguage,
-        onLog: (message) => {
-          appendLog({ level: levelForMessage(message), message, ts: Date.now() });
-          const m = message.toLowerCase();
-          if (m.includes("finding highlights")) {
-            updateStep(0, "done");
-            updateStep(1, "running");
-          }
-        },
-      });
+      const session =
+        request.source === "local" && request.localPath
+          ? await findLocalHighlights({
+              localPath: request.localPath,
+              numClips: request.numClips,
+              ai: request.ai,
+              userDirection: request.userDirection,
+              outputLanguage: request.outputLanguage,
+              onLog: (message) => {
+                appendLog({ level: levelForMessage(message), message, ts: Date.now() });
+                const m = message.toLowerCase();
+                if (m.includes("finding highlights")) {
+                  updateStep(0, "done");
+                  updateStep(1, "running");
+                }
+              },
+            })
+          : await findHighlights({
+              url: request.url,
+              numClips: request.numClips,
+              subtitleLanguage: request.subtitleLanguage,
+              ai: request.ai,
+              userDirection: request.userDirection,
+              outputLanguage: request.outputLanguage,
+              onLog: (message) => {
+                appendLog({ level: levelForMessage(message), message, ts: Date.now() });
+                const m = message.toLowerCase();
+                if (m.includes("finding highlights")) {
+                  updateStep(0, "done");
+                  updateStep(1, "running");
+                }
+              },
+            });
 
       finish();
       setSession(session);
@@ -131,7 +148,9 @@ export function ProcessingPage() {
         <p className="text-sm text-[var(--color-text-muted)] mt-1">
           {error
             ? "Review the log below and try again."
-            : "Downloading subtitle and analyzing the transcript with AI."}
+            : request?.source === "local"
+              ? "Transcribing the audio and analyzing the transcript with AI."
+              : "Downloading subtitle and analyzing the transcript with AI."}
         </p>
       </div>
 

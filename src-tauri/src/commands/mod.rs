@@ -172,6 +172,42 @@ pub async fn find_highlights(
 }
 
 #[tauri::command]
+pub async fn find_local_highlights(
+    app: tauri::AppHandle,
+    local_path: String,
+    num_clips: u32,
+    ai: serde_json::Value,
+    // Optional free-text steer typed on the Create page; empty means "none".
+    user_direction: Option<String>,
+    // Language code for titles and hooks; "auto"/None follows the transcript.
+    output_language: Option<String>,
+    on_event: Channel<FindHighlightsEvent>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let output_dir = cookies_dir(&app)?.join("output");
+
+        let payload = serde_json::json!({
+            "local_path": local_path,
+            "num_clips": num_clips,
+            "output_dir": output_dir.to_string_lossy(),
+            "ai": ai,
+            "user_direction": user_direction
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            "output_language": output_language
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        });
+
+        call_sidecar_streaming(&app, "find_local_highlights", payload, &on_event)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {e}"))?
+}
+
+#[tauri::command]
 pub async fn list_ai_models(app: tauri::AppHandle, api_key: String, base_url: String) -> Result<Vec<String>, String> {
     if api_key.trim().is_empty() {
         return Err("API key is required".to_string());
@@ -820,6 +856,8 @@ pub async fn process_clips(
     options: serde_json::Value,
     ai: serde_json::Value,
     on_event: Channel<ProcessClipsEvent>,
+    // Local-file source (Cliperpro local upload); empty for YouTube URLs.
+    local_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let cookies_path = cookies_dir(&app)?.join("cookies.txt");
@@ -832,6 +870,7 @@ pub async fn process_clips(
 
         let payload = serde_json::json!({
             "url": url,
+            "local_path": local_path.unwrap_or_default().trim().to_string(),
             "highlights": highlights,
             "session_dir": session_dir,
             "options": options,

@@ -6,12 +6,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from .video_processor import download_video_section
+from .video_processor import download_video_section, cut_video_section
 from .portrait import convert_to_portrait, convert_to_portrait_centered, convert_to_portrait_pane
 from .split_screen import combine_split_screen, OUTPUT_HEIGHT
 from .hook_generator import generate_hook
 from .caption_generator import generate_captions_from_words
-from .srt_parser import parse_timestamp
+from .srt_parser import parse_srt_segments, parse_timestamp
 from .watermark import apply_watermark
 
 LogFn = Callable[[str], None]
@@ -151,8 +151,12 @@ def process_selected_highlights(
     options: dict[str, Any],
     ai: dict[str, Any],
     log: LogFn,
+    local_path: str | None = None,
 ) -> dict[str, Any]:
     """Process selected highlights and return output info.
+
+    ``local_path`` (optional): when set, sections are cut from this local file
+    with ``cut_video_section`` instead of being downloaded from YouTube.
 
     options keys: addCaptions, addHook, addWatermark, addCreditWatermark,
                   gpuAcceleration (optional, for hardware encoding)
@@ -232,25 +236,39 @@ def process_selected_highlights(
 
         section_path = str(temp_dir / f"section_{i:03d}.mp4")
 
-        # Step 1: Download video section
+        # Step 1: Get video section — download from YouTube OR cut from a local file
         # Download quality: 1080p (default) / 720p / 480p — set by the user in
         # the ProcessConfirmDialog. Smaller values download less data (halves or
         # quarters the file) but slightly reduce source sharpness. For Shorts
         # (1080x1920 output), 720p is the sweet spot between speed and quality.
         quality_map = {"1080p": 1080, "720p": 720, "480p": 480, "360p": 360, "240p": 240}
         max_height = quality_map.get(options.get("downloadQuality", "720p"), 720)
-        log(f"[{i}/{total}] Download quality: max {max_height}p")
-        log(f"[{i}/{total}] Downloading video section {h['start_time']} -> {h['end_time']}...")
-        video_path = download_video_section(
-            url=url,
-            start_time=h["start_time"],
-            end_time=h["end_time"],
-            output_path=section_path,
-            log=log,
-            max_height=max_height,
-            gpu_config=gpu_config,
-        )
-        log(f"[{i}/{total}] Section downloaded: {video_path}")
+
+        if local_path:
+            if not Path(local_path).exists():
+                raise RuntimeError(f"Local source video not found: {local_path}")
+            log(f"[{i}/{total}] Source: local file — cutting {h['start_time']} -> {h['end_time']}...")
+            video_path = cut_video_section(
+                full_path=local_path,
+                output_path=section_path,
+                start_time=h["start_time"],
+                end_time=h["end_time"],
+                log=lambda m: log(f"[{i}/{total}] {m}"),
+                gpu_config=gpu_config,
+            )
+        else:
+            log(f"[{i}/{total}] Download quality: max {max_height}p")
+            log(f"[{i}/{total}] Downloading video section {h['start_time']} -> {h['end_time']}...")
+            video_path = download_video_section(
+                url=url,
+                start_time=h["start_time"],
+                end_time=h["end_time"],
+                output_path=section_path,
+                log=log,
+                max_height=max_height,
+                gpu_config=gpu_config,
+            )
+        log(f"[{i}/{total}] Section ready: {video_path}")
 
         # Step 2: Portrait conversion (or split-screen composition)
         portrait_path = str(temp_dir / f"portrait_{i:03d}.mp4")
@@ -316,9 +334,9 @@ def process_selected_highlights(
 
         # Step 4: Caption generation (word-by-word, from original subtitle track)
         clip_had_captions = False
+        clip_start = parse_timestamp(h["start_time"])
+        clip_end = parse_timestamp(h["end_time"])
         if add_captions and caption_words:
-            clip_start = parse_timestamp(h["start_time"])
-            clip_end = parse_timestamp(h["end_time"])
             clip_words = _words_for_clip(caption_words, clip_start, clip_end)
 
             if clip_words:
@@ -335,6 +353,40 @@ def process_selected_highlights(
                 log(f"[{i}/{total}] Caption generation complete ({len(clip_words)} words)")
             else:
                 log(f"[{i}/{total}] No subtitle words in this clip's range — captions skipped")
+        elif add_captions and local_path:
+            # Local source: captions use segment timing from the Whisper
+            # transcription SRT (segment-level, not word-by-word).
+            local_srt = session_path / "transcript.srt"
+            if local_srt.exists():
+                segments = [
+                    s for s in parse_srt_segments(str(local_srt))
+                    if float(s["end"]) > clip_start and float(s["start"]) < clip_end
+                ]
+                clip_words = [
+                    {
+                        "word": str(s["text"]).strip().upper(),
+                        "start": float(s["start"]) - clip_start,
+                        "end": float(s["end"]) - clip_start,
+                    }
+                    for s in segments
+                    if str(s["text"]).strip()
+                ]
+                if clip_words:
+                    caption_output_path = str(temp_dir / f"captioned_{i:03d}.mp4")
+                    video_path = generate_captions_from_words(
+                        input_video_path=video_path,
+                        output_path=caption_output_path,
+                        words=clip_words,
+                        caption_style=caption_style,
+                        log=log,
+                        gpu_config=gpu_config,
+                    )
+                    clip_had_captions = True
+                    log(f"[{i}/{total}] Caption generation complete ({len(clip_words)} segments, from transcription)")
+                else:
+                    log(f"[{i}/{total}] No transcript segments in this clip's range — captions skipped")
+            else:
+                log(f"[{i}/{total}] No transcript for local captions — captions skipped")
         elif add_captions:
             log(f"[{i}/{total}] Caption generation skipped (no subtitle word-timing)")
         else:

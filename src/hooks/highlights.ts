@@ -20,7 +20,11 @@ export interface VideoInfo {
 export interface SessionData {
   session_dir: string;
   url: string;
-  srt_path: string;
+  /** "local" when the session came from an uploaded local file. */
+  source?: "local";
+  /** Session copy of the uploaded local video (local sessions only). */
+  local_video_path?: string;
+  srt_path: string | null;
   subtitle_language: string;
   /** Free-text steer the user typed on the Create page, or null if none. */
   user_direction?: string | null;
@@ -71,6 +75,34 @@ export async function findHighlights(params: {
     url: params.url,
     numClips: params.numClips,
     subtitleLanguage: params.subtitleLanguage,
+    ai: params.ai,
+    userDirection: params.userDirection?.trim() || null,
+    outputLanguage: params.outputLanguage || null,
+    onEvent: channel,
+  });
+}
+
+/** Find highlights for an UPLOADED LOCAL FILE (Cliperpro local source). */
+export async function findLocalHighlights(params: {
+  localPath: string;
+  numClips: number;
+  ai: AIRequestSettings;
+  /** Optional free-text steer injected into the highlight prompt. */
+  userDirection?: string;
+  /** Language code for titles and hooks, or "auto" to follow the transcript. */
+  outputLanguage?: string;
+  onLog?: (message: string) => void;
+}): Promise<SessionData> {
+  const channel = new Channel<FindHighlightsEvent>();
+  if (params.onLog) {
+    channel.onmessage = (event) => {
+      if (event.type === "log") params.onLog!(event.message);
+    };
+  }
+
+  return invoke<SessionData>("find_local_highlights", {
+    localPath: params.localPath,
+    numClips: params.numClips,
     ai: params.ai,
     userDirection: params.userDirection?.trim() || null,
     outputLanguage: params.outputLanguage || null,

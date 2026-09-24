@@ -15,6 +15,7 @@ pub fn run() {
             commands::list_ai_models,
             commands::detect_gpu,
             commands::find_highlights,
+            commands::find_local_highlights,
             commands::list_sessions,
             commands::load_session,
             commands::delete_session,

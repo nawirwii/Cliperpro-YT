@@ -22,6 +22,8 @@ import { cn } from "@/lib/utils";
 
 interface ClipProcessingState {
   url: string;
+  /** Local-file source path (uploaded sessions). */
+  localPath?: string;
   highlights: unknown[];
   sessionDir: string;
   options: ProcessOptions;
@@ -67,8 +69,8 @@ export function ProcessingClipsPage() {
 
   const run = useCallback(async () => {
     const store = useProcessingClipsStore.getState();
-    if (!store.initialized || !store.url) return;
-    const { url, highlights: hls, sessionDir, options } = store;
+    if (!store.initialized || (!store.url && !store.localPath)) return;
+    const { url, localPath, highlights: hls, sessionDir, options } = store;
 
     if (!config.ai.apiKey || !config.ai.model) {
       store.setError("AI provider not configured. Please set it up in AI Models first.");
@@ -85,6 +87,7 @@ export function ProcessingClipsPage() {
 
       const result = (await processClips({
         url,
+        localPath: localPath?.trim() || undefined,
         highlights: hls,
         sessionDir,
         options: {
@@ -250,8 +253,8 @@ export function ProcessingClipsPage() {
       return;
     }
 
-    const { url, highlights: hls, sessionDir, options } = state;
-    store.start({ url, highlights: hls, sessionDir, options });
+    const { url, localPath, highlights: hls, sessionDir, options } = state;
+    store.start({ url, localPath, highlights: hls, sessionDir, options });
     void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

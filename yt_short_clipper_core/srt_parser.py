@@ -48,3 +48,27 @@ def extract_transcript_for_highlight(srt_path: str, start_time: str, end_time: s
                 lines.append(clean_text)
 
     return " ".join(lines)
+
+
+def parse_srt_segments(srt_path: str) -> list[dict[str, float | str]]:
+    """Parse an SRT file into time-ordered segments (whisper-style).
+
+    Returns ``[{"start": float, "end": float, "text": str}, ...]`` in seconds.
+    Used for segment-level (not word-level) captions when the transcript came
+    from a local-file Whisper transcription instead of a YouTube subtitle.
+    """
+    with open(srt_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    matches = re.findall(_SRT_PATTERN, content, re.DOTALL)
+    segments = []
+    for _idx, start, end, text in matches:
+        clean_text = text.replace("\n", " ").strip()
+        if not clean_text:
+            continue
+        segments.append({
+            "start": parse_timestamp(start),
+            "end": parse_timestamp(end),
+            "text": clean_text,
+        })
+    return segments

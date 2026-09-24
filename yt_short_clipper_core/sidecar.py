@@ -257,16 +257,18 @@ Return ONLY valid JSON in this exact format:
     if command == "process_selected_highlights":
         from yt_short_clipper_core.clip_processor import process_selected_highlights
 
-        url = payload.get("url")
+        url = payload.get("url") or ""
+        local_path = payload.get("local_path") or None
         highlights = payload.get("highlights")
         session_dir = payload.get("session_dir")
         options = payload.get("options", {})
         ai = payload.get("ai") or {}
 
-        if not url or not highlights or not session_dir:
-            raise SidecarError("Missing url, highlights, or session_dir")
+        if (not url and not local_path) or not highlights or not session_dir:
+            raise SidecarError("Missing url/local_path, highlights, or session_dir")
         # No AI key needed here: captions come from the YouTube subtitle track
-        # and hook text is rendered locally from pre-generated highlight data.
+        # (or the local transcription SRT) and hook text is rendered locally
+        # from pre-generated highlight data.
 
         def emit_log(message: str) -> None:
             write_json({"event": "log", "message": message})
@@ -278,6 +280,7 @@ Return ONLY valid JSON in this exact format:
             options=options,
             ai=ai,
             log=emit_log,
+            local_path=local_path,
         )
 
     if command == "find_highlights":
@@ -303,6 +306,30 @@ Return ONLY valid JSON in this exact format:
             subtitle_language=payload.get("subtitle_language", "id"),
             output_dir=payload.get("output_dir"),
             cookies_path=cookies_path,
+            ai=ai,
+            user_direction=payload.get("user_direction"),
+            output_language=payload.get("output_language"),
+            log=emit_log,
+        )
+
+    if command == "find_local_highlights":
+        from yt_short_clipper_core.session import find_local_highlights_only
+
+        local_path = payload.get("local_path")
+        ai = payload.get("ai") or {}
+
+        if not local_path:
+            raise SidecarError("Missing payload.local_path")
+        if not ai.get("api_key") or not ai.get("model"):
+            raise SidecarError("Missing AI api_key/model. Configure Highlight Finder first.")
+
+        def emit_log(message: str) -> None:
+            write_json({"event": "log", "message": message})
+
+        return find_local_highlights_only(
+            local_path=local_path,
+            num_clips=int(payload.get("num_clips", 5)),
+            output_dir=payload.get("output_dir"),
             ai=ai,
             user_direction=payload.get("user_direction"),
             output_language=payload.get("output_language"),

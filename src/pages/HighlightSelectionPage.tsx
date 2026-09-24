@@ -163,6 +163,7 @@ export function HighlightSelectionPage() {
             navigate("/processing-clips", {
               state: {
                 url: session.url,
+                localPath: session.local_video_path,
                 highlights: highlightsWithIndex,
                 sessionDir: session.session_dir,
                 options,
