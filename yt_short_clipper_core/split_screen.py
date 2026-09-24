@@ -206,28 +206,68 @@ def combine_split_screen(
     else:
         log(f"Using CPU encoder: libx264")
 
-    cmd = [
-        ffmpeg_path,
-        *inputs,
-        "-filter_complex", ";".join(filter_parts),
-        "-map", "[v]",
-    ]
+    # QSV (Intel) is special: feeding CPU frames straight from a complex
+    # filtergraph makes FFmpeg auto-insert hwupload WITHOUT extra_hw_frames,
+    # and many Intel drivers then reject the encoder session at init with
+    # "Task finished with error code: -22 (Invalid argument)" at frame=0.
+    # Fix (matches gpu.py probe): explicit device + NV12 surface + hwupload
+    # with a frame pool. Other HW encoders (nvenc/amf) accept CPU frames
+    # directly and keep the plain yuv420p graph.
+    is_qsv = enc_name == "h264_qsv"
+    qsv_graph = list(filter_parts)
+    cpu_graph = list(filter_parts)
+    if is_qsv:
+        qsv_graph[-1] = (
+            "[top][bottom]vstack=inputs=2,"
+            "format=nv12,hwupload=extra_hw_frames=64[v]"
+        )
+
+    # Shared audio suffix (video graph and audio graph stay separate — see
+    # v2.0.70: labeled amix MUST NOT go into -af, and audio must not join the
+    # video filtergraph or QSV hardware encode breaks).
+    audio_suffix: list[str] = []
     if audio_filter_complex:
-        # Second, AUDIO-ONLY filter_complex (FFmpeg supports multiple
-        # -filter_complex graphs) — mixes both inputs, mapped via the [a] label.
-        cmd += ["-filter_complex", audio_filter_complex, "-ar", "48000"]
+        audio_suffix += ["-filter_complex", audio_filter_complex, "-ar", "48000"]
     if audio_filter:
-        cmd += ["-af", audio_filter, "-ar", "48000"]
-    cmd += audio_map
-    cmd += [
-        *video_enc_args,
-        "-t", f"{main_dur:.3f}",
-        "-movflags", "+faststart",
-        output_path,
-    ]
+        audio_suffix += ["-af", audio_filter, "-ar", "48000"]
+    audio_suffix += audio_map
+
+    def build_video_cmd(head: list[str], graph_parts: list[str], enc_args: list[str]) -> list[str]:
+        return [
+            ffmpeg_path, *head, *inputs,
+            "-filter_complex", ";".join(graph_parts),
+            "-map", "[v]",
+            *audio_suffix,
+            *enc_args,
+            "-t", f"{main_dur:.3f}",
+            "-movflags", "+faststart",
+            output_path,
+        ]
 
     log(f"Composing split screen ({OUTPUT_WIDTH}x{OUTPUT_HEIGHT}, top {top_ratio:.0%})...")
+    if is_qsv:
+        cmd = build_video_cmd(
+            ["-init_hw_device", "qsv=hw", "-filter_hw_device", "hw"],
+            qsv_graph,
+            video_enc_args,
+        )
+    else:
+        cmd = build_video_cmd([], cpu_graph, video_enc_args)
     result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS)
+
+    # Graceful fallback: if the hardware encoder fails (driver quirks, e.g.
+    # QSV -22 at init), retry ONCE on CPU so the clip still completes instead
+    # of crashing the whole session. The user sees a clear warning.
+    if result.returncode != 0 and enc_name:
+        log(f"⚠️ Hardware encoder {enc_name} failed — retrying with CPU (libx264)")
+        cpu_cmd = build_video_cmd(
+            [],
+            cpu_graph,
+            ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"],
+        )
+        result = subprocess.run(cpu_cmd, capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS)
+        if result.returncode == 0:
+            log("⚠️ Split screen completed with CPU encoder (hardware encoder unavailable)")
 
     if result.returncode != 0:
         raise RuntimeError(f"Split screen composition failed: {result.stderr[-500:]}")
