@@ -157,19 +157,23 @@ def combine_split_screen(
             "[top][bottom]vstack=inputs=2,format=yuv420p[v]",
         ]
 
-    # Audio handling: ALWAYS use -af (separate from video filter_complex)
-    # to avoid "Function not implemented" (fc#0) on Windows with hardware encoders.
+    # Audio handling:
+    #  - Single-audio cases: plain chain in -af (simple filtergraph, 1 input).
+    #  - Both-audio case: the labeled amix chain CANNOT live in -af — a simple
+    #    filtergraph rejects 2 inputs ("Simple filtergraph '(null)' was expected
+    #    to have exactly 1 input and 1 output"). It goes into its OWN audio-only
+    #    -filter_complex, kept separate from the video graph so hardware
+    #    encoders on Windows don't hit "Function not implemented" (fc#0).
     audio_map = []
-    audio_filter = None
+    audio_filter = None            # plain chain -> -af (single input only)
+    audio_filter_complex = None    # labeled chain -> separate -filter_complex
     if main_has_audio and second_has_audio:
-        # Map both audio streams, mix with amix in -af filtergraph
-        audio_map = ["-map", "0:a", "-map", "1:a"]
-        audio_filter = (
+        audio_filter_complex = (
             f"[0:a]volume={main_volume:.2f},aresample=48000[a0];"
             f"[1:a]volume={second_volume:.2f},aresample=48000[a1];"
             f"[a0][a1]amix=inputs=2:duration=longest:dropout_transition=0[a]"
         )
-        audio_map += ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
+        audio_map = ["-map", "[a]", "-c:a", "aac", "-b:a", "192k"]
     elif main_has_audio:
         audio_map = ["-map", "0:a", "-c:a", "aac", "-b:a", "192k"]
         audio_filter = f"volume={main_volume:.2f}"
@@ -178,7 +182,6 @@ def combine_split_screen(
         audio_filter = f"volume={second_volume:.2f}"
     else:
         audio_map = ["-an"]
-        audio_filter = None
     gpu_enabled = gpu_config and gpu_config.get("enabled", False) if gpu_config else False
     enc_name = gpu_config.get("encoder") if gpu_enabled else None
     enc_preset = gpu_config.get("preset") if gpu_enabled else None
@@ -208,10 +211,14 @@ def combine_split_screen(
         *inputs,
         "-filter_complex", ";".join(filter_parts),
         "-map", "[v]",
-        *audio_map,
     ]
+    if audio_filter_complex:
+        # Second, AUDIO-ONLY filter_complex (FFmpeg supports multiple
+        # -filter_complex graphs) — mixes both inputs, mapped via the [a] label.
+        cmd += ["-filter_complex", audio_filter_complex, "-ar", "48000"]
     if audio_filter:
         cmd += ["-af", audio_filter, "-ar", "48000"]
+    cmd += audio_map
     cmd += [
         *video_enc_args,
         "-t", f"{main_dur:.3f}",
