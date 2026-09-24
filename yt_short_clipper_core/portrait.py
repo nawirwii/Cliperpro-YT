@@ -188,6 +188,7 @@ def convert_to_portrait_pane(
     output_path: str,
     log: LogFn | None = None,
     output_height: int = 1536,
+    gpu_config: dict[str, Any] | None = None,
 ) -> str:
     """Reframe a video for the SPLIT-SCREEN top pane: face-tracked portrait crop.
 
@@ -202,6 +203,7 @@ def convert_to_portrait_pane(
     convert_to_portrait(
         input_path, output_path, log=log,
         output_width=1080, output_height=output_height,
+        gpu_config=gpu_config,
     )
     log(f"Split-pane portrait conversion complete: {output_path}")
     return output_path
