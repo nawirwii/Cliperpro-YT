@@ -105,7 +105,7 @@ Set-Content -Path (Join-Path $Stage "run.bat") -Value $runBat -Encoding ASCII
 
 # --- PANDUAN.txt (interpolates $Version) ---
 $panduan = @"
-PANDUAN SINGKAT YT SHORT CLIPPER V2
+PANDUAN SINGKAT CLIPERPRO
 ====================================
 
 1. CARA MENJALANKAN
