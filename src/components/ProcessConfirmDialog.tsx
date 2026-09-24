@@ -142,7 +142,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       splitScreen: {
         enabled: splitEnabled && !!splitWebcamPath,
         webcamPath: splitWebcamPath,
-        topRatio: 0.5,
+        topRatio: 0.8,
         mainVolume: splitMainVolume / 100,
         secondVolume: splitSecondVolume / 100,
       },
