@@ -16,7 +16,11 @@ interface ConfigState {
   loaded: boolean;
   load: () => Promise<void>;
   setAI: (settings: AIProviderSettings) => Promise<void>;
-  setGpuAcceleration: (enabled: boolean) => Promise<void>;
+  setGpuAcceleration: (settings: {
+    enabled: boolean;
+    encoder?: string | null;
+    preset?: string | null;
+  }) => Promise<void>;
   setWatermark: (watermark: WatermarkSettings) => Promise<void>;
   setCreditWatermark: (creditWatermark: CreditWatermarkSettings) => Promise<void>;
   setHookStyle: (hookStyle: HookStyleSettings) => Promise<void>;
@@ -46,10 +50,14 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     set({ config: saved });
   },
 
-  setGpuAcceleration: async (enabled) => {
+  setGpuAcceleration: async (settings) => {
     const next: AppConfig = {
       ...get().config,
-      gpuAcceleration: { enabled },
+      gpuAcceleration: {
+        enabled: settings.enabled,
+        encoder: settings.encoder ?? null,
+        preset: settings.preset ?? null,
+      },
     };
     const saved = await saveAppConfig(next);
     set({ config: saved });
