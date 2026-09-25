@@ -9,6 +9,8 @@ import {
   FALLBACK_MODELS,
   presetForBaseUrl,
   signupLabel,
+  TRANSCRIPTION_PRESETS,
+  transcriptionPresetFor,
 } from "@/config/aiProviders";
 import { listAIModels, type AIProviderSettings } from "@/hooks/appConfig";
 import { useConfigStore } from "@/stores/configStore";
@@ -72,6 +74,28 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
 
   const isCustom = providerKey === "custom";
   const signupUrl = selectedPreset.signupUrl;
+
+  // v2.0.87: transcription provider presets. Seed the picker from whatever is
+  // already saved so an existing config keeps showing the right provider,
+  // and fall back to Hugging Face rather than "custom" so the most common
+  // setup is one click away.
+  const [transcriptionPresetKey, setTranscriptionPresetKey] = useState(
+    () => transcriptionPresetFor(settings.transcriptionBaseUrl || "", settings.transcriptionModel || "").key
+  );
+  const transcriptionPreset = useMemo(
+    () => TRANSCRIPTION_PRESETS.find((p) => p.key === transcriptionPresetKey) ?? TRANSCRIPTION_PRESETS[0],
+    [transcriptionPresetKey]
+  );
+
+  const handleTranscriptionPresetChange = (key: string) => {
+    setTranscriptionPresetKey(key);
+    const preset = TRANSCRIPTION_PRESETS.find((p) => p.key === key);
+    if (!preset) return;
+    // Prefill the fields, but keep the API key the user already typed — it is
+    // provider-specific and we must never silently discard a credential.
+    setTranscriptionUrl(preset.baseUrl);
+    setTranscriptionModel(preset.model);
+  };
 
   const handleProviderChange = (value: string) => {
     const preset = AI_PROVIDER_PRESETS.find((p) => p.key === value) ?? AI_PROVIDER_PRESETS[0];
@@ -286,15 +310,33 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-[var(--color-text-muted)]">
-            Optional — used ONLY when transcribing an uploaded local video file
-            (&quot;File Lokal&quot; source). Your main AI provider may not expose a
-            Whisper endpoint. Examples:{" "}
-            <code className="px-1 rounded bg-[var(--color-bg-secondary)]">https://api.openai.com/v1</code>{" "}
-            + <code className="px-1 rounded bg-[var(--color-bg-secondary)]">whisper-1</code>, or{" "}
-            <code className="px-1 rounded bg-[var(--color-bg-secondary)]">https://api.groq.com/openai/v1</code>{" "}
-            + <code className="px-1 rounded bg-[var(--color-bg-secondary)]">whisper-large-v3-turbo</code>.
-            Leave empty to reuse the main provider above.
+            Dipakai HANYA saat transkripsi video lokal yang Bos upload ("File
+            Lokal"). Provider AI utama belum tentu punya endpoint Whisper — jadi
+            isi terpisah di sini. Biarkan kosong untuk memakai provider utama.
           </p>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+              Provider Transkripsi
+            </label>
+            <select
+              value={transcriptionPresetKey}
+              onChange={(e) => handleTranscriptionPresetChange(e.target.value)}
+              className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+            >
+              {TRANSCRIPTION_PRESETS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {transcriptionPreset.description} · API key:{" "}
+              <code className="px-1 rounded bg-[var(--color-bg-secondary)]">
+                {transcriptionPreset.apiKeyFormat}
+              </code>
+            </p>
+          </div>
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-[var(--color-text-secondary)]">
@@ -303,7 +345,7 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
             <Input
               value={transcriptionUrl}
               onChange={(e) => setTranscriptionUrl(e.target.value)}
-              placeholder="https://.../v1 (leave empty to reuse main provider)"
+              placeholder={transcriptionPreset.baseUrl}
             />
           </div>
 
@@ -314,7 +356,7 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
             <Input
               value={transcriptionModel}
               onChange={(e) => setTranscriptionModel(e.target.value)}
-              placeholder="whisper-1 (leave empty to reuse main model)"
+              placeholder={transcriptionPreset.model}
             />
           </div>
 
@@ -326,8 +368,16 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
               type="password"
               value={transcriptionKey}
               onChange={(e) => setTranscriptionKey(e.target.value)}
-              placeholder="Leave empty to reuse main API key"
+              placeholder="Kosongkan untuk memakai API key provider utama"
             />
+            <a
+              href={transcriptionPreset.signupUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-block text-xs underline text-[var(--color-accent)]"
+            >
+              Ambil API key di {signupLabel(transcriptionPreset.signupUrl)} →
+            </a>
           </div>
         </CardContent>
       </Card>

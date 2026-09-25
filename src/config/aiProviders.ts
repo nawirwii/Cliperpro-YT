@@ -83,3 +83,85 @@ export function presetForBaseUrl(baseUrl: string): AIProviderPreset {
 export function signupLabel(url: string): string {
   return new URL(url).host.replace(/^www\./, "");
 }
+
+export interface TranscriptionPreset {
+  key: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  description: string;
+  /** Where to mint the key. */
+  signupUrl: string;
+  /** Token prefix, so the user knows they pasted the right credential. */
+  apiKeyFormat: string;
+}
+
+/**
+ * Presets for the "Transcription (local videos)" card.
+ *
+ * v2.0.87: Hugging Face was added because the old endpoint people were told to
+ * use, `api-inference.huggingface.co`, no longer resolves at all — verified
+ * with getent, the hostname returns nothing, so *every* transcription attempt
+ * failed at DNS before a single byte was uploaded. The OpenAI-compatible
+ * surface is now `https://router.huggingface.co/v1` (HTTP 200 on /v1/models;
+ * /v1/audio/transcriptions answers 401 without a token, i.e. the route is
+ * live and only auth is missing). Model names are the real HF repo ids, each
+ * confirmed via the public model API as `automatic-speech-recognition`.
+ */
+export const TRANSCRIPTION_PRESETS: TranscriptionPreset[] = [
+  {
+    key: "huggingface",
+    name: "🤗 Hugging Face",
+    baseUrl: "https://router.huggingface.co/v1",
+    model: "openai/whisper-large-v3-turbo",
+    description:
+      "Hugging Face Inference Providers (OpenAI-compatible). Token bertipe hf_",
+    signupUrl: "https://huggingface.co/settings/tokens",
+    apiKeyFormat: "hf_*",
+  },
+  {
+    key: "groq",
+    name: "⚡ Groq",
+    baseUrl: "https://api.groq.com/openai/v1",
+    model: "whisper-large-v3-turbo",
+    description: "Groq fast inference API",
+    signupUrl: "https://console.groq.com/keys",
+    apiKeyFormat: "gsk-*",
+  },
+  {
+    key: "openai",
+    name: "🔴 OpenAI",
+    baseUrl: "https://api.openai.com/v1",
+    model: "whisper-1",
+    description: "OpenAI Whisper endpoint",
+    signupUrl: "https://platform.openai.com/api-keys",
+    apiKeyFormat: "sk-*",
+  },
+  {
+    key: "custom",
+    name: "⚙️ Custom / Local",
+    baseUrl: "http://localhost:8000/v1",
+    model: "whisper-1",
+    description: "Custom OpenAI-compatible endpoint (faster-whisper server, vLLM, dll)",
+    signupUrl: "https://github.com/faster-whisper/faster-whisper",
+    apiKeyFormat: "optional",
+  },
+];
+
+export function transcriptionPresetFor(
+  baseUrl: string,
+  model: string
+): TranscriptionPreset {
+  const hit = TRANSCRIPTION_PRESETS.find((p) => {
+    if (p.key === "custom" || !baseUrl) return false;
+    try {
+      return (
+        baseUrl.includes(new URL(p.baseUrl).host) &&
+        (model === p.model || !model)
+      );
+    } catch {
+      return false;
+    }
+  });
+  return hit ?? TRANSCRIPTION_PRESETS[TRANSCRIPTION_PRESETS.length - 1];
+}
