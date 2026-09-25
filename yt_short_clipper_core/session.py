@@ -11,12 +11,17 @@ from typing import Any, Callable
 from .constants import resolve_output_language
 from .helpers import debug_log, get_ffmpeg_path
 from .highlight_finder import find_highlights, parse_requested_ranges
-from .srt_parser import extract_transcript_for_highlight, parse_srt
+from .srt_parser import extract_transcript_for_highlight, parse_srt, parse_srt_segments
 from .subtitle_downloader import download_caption_words, download_subtitle_only
 
 LogFn = Callable[[str], None]
 
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+# Groq/OpenAI Whisper upload cap is ~25 MB per request. We keep a margin so
+# a long local video never trips it: mono MP3 @64kbps ≈ 4.8 MB per 10 min.
+GROQ_UPLOAD_LIMIT = 22 * 1024 * 1024
+CHUNK_SECONDS = 600  # 10-min chunks for audio longer than the upload cap
 
 
 def find_highlights_only(
@@ -227,6 +232,47 @@ def _extract_audio(ffmpeg_path: str, video_path: Path, wav_path: Path, log: LogF
         )
 
 
+def _run_ffmpeg(cmd: list[str]) -> None:
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {(result.stderr or '')[-400:]}")
+
+
+def _format_srt_time(seconds: float) -> str:
+    ms = int(round((seconds - int(seconds)) * 1000))
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _write_srt(path: Path, segments: list[dict[str, Any]]) -> None:
+    lines: list[str] = []
+    for i, seg in enumerate(segments, 1):
+        start = float(seg["start"])
+        end = float(seg["end"])
+        lines.append(
+            f"{i}\n{_format_srt_time(start)} --> {_format_srt_time(end)}\n{seg['text']}\n"
+        )
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _transcribe_upload(client: Any, model: str, audio_path: Path) -> str:
+    """POST one audio file to /audio/transcriptions; returns SRT text."""
+    with open(audio_path, "rb") as f:
+        result = client.audio.transcriptions.create(
+            model=model,
+            file=(audio_path.name, f, "audio/mpeg"),
+            response_format="srt",
+        )
+    text = result if isinstance(result, str) else getattr(result, "text", "")
+    if not text or not text.strip():
+        raise RuntimeError("Whisper transcription returned an empty result.")
+    return text
+
+
 def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: LogFn) -> None:
     """Transcribe local audio via an OpenAI-compatible Whisper endpoint.
 
@@ -236,6 +282,12 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
     provider used for highlight detection (base_url + api_key + model).
     The endpoint must support ``/audio/transcriptions``
     (e.g. whisper-1 / groq whisper / a local whisper gateway).
+
+    The extracted WAV is re-encoded to a small mono MP3 before upload so a
+    long video (43 min of WAV ≈ 82 MB) stays under the provider's ~25 MB
+    cap — otherwise the server drops the connection mid-upload. Audio that
+    is still too big is split into 10-minute chunks, transcribed
+    separately, and merged back into a single SRT with shifted offsets.
     """
     from openai import OpenAI
 
@@ -254,7 +306,6 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
         or ai.get("model")
         or "whisper-1"
     )
-    log(f"Transcribing audio with {model} via {base_url}...")
 
     if not api_key:
         raise RuntimeError(
@@ -265,17 +316,83 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
     client = OpenAI(api_key=api_key, base_url=base_url)
 
     try:
-        with open(wav_path, "rb") as f:
-            result = client.audio.transcriptions.create(
-                model=model,
-                file=("audio.wav", f, "audio/wav"),
-                response_format="srt",
-            )
+        # 1) Compress: mono 64k MP3 (43-min WAV = 82 MB → ~21 MB).
+        mp3_path = wav_path.with_suffix(".mp3")
+        log(f"Compressing audio for upload ({wav_path.name})...")
+        _run_ffmpeg([
+            get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(wav_path), "-ac", "1", "-ar", "16000",
+            "-c:a", "libmp3lame", "-b:a", "64k", str(mp3_path),
+        ])
+
+        size = mp3_path.stat().st_size
+        if size <= GROQ_UPLOAD_LIMIT:
+            log(f"Transcribing audio with {model} via {base_url} ({size / 1024 / 1024:.1f} MB)...")
+            srt_text = _transcribe_upload(client, model, mp3_path)
+            srt_path.write_text(srt_text, encoding="utf-8")
+            log(f"Transcription saved: {srt_path}")
+            return
+
+        # 2) Long audio → split into fixed 10-min chunks and merge with offset.
+        log(f"Audio {size / 1024 / 1024:.1f} MB exceeds upload cap — splitting into "
+            f"{CHUNK_SECONDS // 60}-minute chunks...")
+        chunk_dir = wav_path.parent / "chunks"
+        if chunk_dir.exists():
+            shutil.rmtree(chunk_dir)  # stale chunks from a previous run
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        _run_ffmpeg([
+            get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(mp3_path), "-f", "segment", "-segment_time", str(CHUNK_SECONDS),
+            "-reset_timestamps", "1", "-c:a", "libmp3lame", "-b:a", "64k",
+            str(chunk_dir / "chunk_%03d.mp3"),
+        ])
+        chunks = sorted(chunk_dir.glob("chunk_*.mp3"))
+        if not chunks:
+            raise RuntimeError("Audio chunking produced no chunks.")
+
+        segments: list[dict[str, Any]] = []
+        for i, chunk in enumerate(chunks):
+            offset = i * CHUNK_SECONDS
+            log(f"Transcribing chunk {i + 1}/{len(chunks)} ({chunk.name})...")
+            chunk_srt = chunk.with_suffix(".srt")
+            chunk_srt.write_text(_transcribe_upload(client, model, chunk), encoding="utf-8")
+            for seg in parse_srt_segments(str(chunk_srt)):
+                segments.append({
+                    "start": float(seg["start"]) + offset,
+                    "end": float(seg["end"]) + offset,
+                    "text": seg["text"],
+                })
+        _write_srt(srt_path, segments)
+        log(f"Transcription saved (merged {len(chunks)} chunks): {srt_path}")
+    except RuntimeError:
+        raise
     except Exception as exc:
-        # The chat-completions endpoint (e.g. a local Hermes gateway) does
-        # NOT implement /audio/transcriptions — give an actionable hint
-        # instead of a raw 400 body.
+        # Give an actionable message instead of a raw API body. What the
+        # failure means depends on the error class:
+        #   - APIConnectionError  → upload dropped (file too big / network)
+        #   - AuthenticationError → bad API key (401)
+        #   - BadRequestError     → endpoint does not implement transcription
+        from openai import APIConnectionError, AuthenticationError, BadRequestError
+
         detail = str(getattr(exc, "body", "") or exc).strip()
+        if isinstance(exc, APIConnectionError):
+            raise RuntimeError(
+                "Transcription connection error — koneksi terputus saat upload "
+                "(audio terlalu besar atau jaringan tidak stabil). App sudah "
+                "mengompres & memotong audio otomatis; cek koneksi internet ke "
+                f"{base_url} lalu coba lagi. Details: {str(exc)[:200]}"
+            ) from exc
+        if isinstance(exc, AuthenticationError):
+            raise RuntimeError(
+                "Transcription API key ditolak (401) — cek API key di "
+                "Settings → AI Model → Transcription "
+                f"(Groq: https://console.groq.com). Details: {detail[:300]}"
+            ) from exc
+        if isinstance(exc, BadRequestError) and getattr(exc, "status_code", None) == 413:
+            raise RuntimeError(
+                "Transcription file terlalu besar — provider menerima maks "
+                "~25 MB per upload."
+            ) from exc
         raise RuntimeError(
             "Transcription failed — this AI endpoint does not support "
             "audio transcription. In Settings → AI Model, fill in "
@@ -283,12 +400,6 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
             "model whisper-1, or https://api.groq.com/openai/v1 with "
             f"whisper-large-v3-turbo). Details: {detail[:300]}"
         ) from exc
-
-    text = result if isinstance(result, str) else getattr(result, "text", "")
-    if not text or not text.strip():
-        raise RuntimeError("Whisper transcription returned an empty result.")
-    srt_path.write_text(text, encoding="utf-8")
-    log(f"Transcription saved: {srt_path}")
 
 
 def find_local_highlights_only(

@@ -1,16 +1,21 @@
-"""Smoke test v2.0.77 — transcription override + actionable error.
+"""Smoke test v2.0.78 — transcription chunking + error taxonomy.
 
-Simulates two OpenAI-compatible endpoints:
-  1. A "chat-only" gateway (like Bos's Hermes gateway) that returns 400
-     for /audio/transcriptions  -> must raise a clear RuntimeError hint.
-  2. A real Whisper endpoint that returns SRT -> must write transcript.srt
-     and use the transcription_* override (not the main chat model).
+Simulates OpenAI-compatible endpoints:
+  1. "chat_only" gateway 400        -> actionable "does not support" hint
+  2. real whisper endpoint          -> SRT written, transcription_* override used
+  3. main-model fallback            -> same provider as highlight detection
+  4. missing API key                -> clear key error
+  5. oversized audio                -> auto 10-min (patched) chunking, merged SRT
+                                      with shifted offsets, one upload per chunk
+  6. server drops connection        -> "connection error" hint, NOT "does not support"
 Regression: cut_video_section + parse_srt_segments still pass.
 """
 import json
+import re
+import socket
+import subprocess
 import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -25,6 +30,7 @@ SRT_SAMPLE = (
     "2\n00:00:01,500 --> 00:00:03,000\nIni transkripsi lokal.\n\n"
     "3\n00:00:03,000 --> 00:00:04,000\nSelesai.\n\n"
 )
+
 
 class MockHandler(BaseHTTPRequestHandler):
     mode = "chat_only"  # patched per-test
@@ -47,6 +53,15 @@ class MockHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         MockHandler.hits.append(self.path)
+        if self.mode == "drop":
+            # Simulate a server that kills the connection mid/after upload
+            # (what Groq did for the 82 MB WAV in the bug report).
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.connection.close()
+            return
         if self.mode == "chat_only":
             body = json.dumps({
                 "error": {
@@ -76,6 +91,16 @@ def serve():
     return server
 
 
+def make_wav(path: Path, seconds: float) -> None:
+    """Real 16kHz mono WAV so ffmpeg compression works in the smoke test."""
+    subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+         "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=16000",
+         "-t", str(seconds), "-ac", "1", "-c:a", "pcm_s16le", str(path)],
+        check=True,
+    )
+
+
 def main():
     from yt_short_clipper_core import session
     from yt_short_clipper_core.srt_parser import parse_srt_segments
@@ -92,7 +117,7 @@ def main():
     tmp = Path("/tmp/smoke77")
     tmp.mkdir(parents=True, exist_ok=True)
     wav = tmp / "audio.wav"
-    wav.write_bytes(b"RIFF-fake-wav")
+    make_wav(wav, 4.0)
 
     passed = 0
     failed = 0
@@ -124,6 +149,7 @@ def main():
         print(f"    DEBUG S1 hits={MockHandler.hits} detail={msg[-120:]!r}")
 
     # --- Scenario 2: whisper endpoint via transcription_* override
+    logs.clear()
     MockHandler.mode = "whisper"
     MockHandler.hits.clear()
     srt2 = tmp / "t2.srt"
@@ -142,12 +168,13 @@ def main():
     content = srt2.read_text(encoding="utf-8")
     check("S2 SRT content matches", content.strip() == SRT_SAMPLE.strip())
     check("S2 used override base_url", "Transcribing audio with whisper-1 via" in str(logs))
+    check("S2 used compressed mp3", "Compressing audio for upload" in str(logs))
     print(f"    DEBUG S2 hits={MockHandler.hits}")
 
     # --- Scenario 3: fallback to main model when override is empty
+    logs.clear()
     MockHandler.mode = "whisper"
     MockHandler.hits.clear()
-    logs.clear()
     srt3 = tmp / "t3.srt"
     session._transcribe_audio(
         {"base_url": base, "api_key": "k", "model": "Hermes_combo"},
@@ -163,6 +190,51 @@ def main():
     except RuntimeError as e:
         check("S4 missing key raises", "API key is missing" in str(e))
 
+    # --- Scenario 5: oversized audio -> auto chunking + merged offsets
+    wav_long = tmp / "long.wav"
+    make_wav(wav_long, 8.9)  # 3s chunks -> exactly 3 chunks (3+3+2.9)
+    orig_limit, orig_chunk = session.GROQ_UPLOAD_LIMIT, session.CHUNK_SECONDS
+    session.GROQ_UPLOAD_LIMIT = 40_000  # force chunking: ~9s mp3 > 40KB at 64kbps
+    session.CHUNK_SECONDS = 3           # 3-sec chunks -> 3 POSTs
+    MockHandler.mode = "whisper"
+    MockHandler.hits.clear()
+    logs.clear()
+    srt5 = tmp / "t5.srt"
+    try:
+        session._transcribe_audio(
+            {"base_url": base, "api_key": "k", "model": "whisper-large-v3-turbo"},
+            wav_long, srt5, log,
+        )
+        session.GROQ_UPLOAD_LIMIT, session.CHUNK_SECONDS = orig_limit, orig_chunk
+        posts = [h for h in MockHandler.hits if h.endswith("/audio/transcriptions")]
+        check("S5 chunked into 3 uploads", len(posts) == 3, f"hits={MockHandler.hits}")
+        check("S5 log mentions chunking", "exceeds upload cap" in str(logs), str(logs))
+        segs = parse_srt_segments(str(srt5))
+        check("S5 merged 9 segments", len(segs) == 9, f"n={len(segs)}")
+        check("S5 chunk2 offset +3s", abs(segs[3]["start"] - 3.0) < 0.35, f"start={segs[3]['start']}")
+        check("S5 chunk3 offset +6s", abs(segs[6]["start"] - 6.0) < 0.35, f"start={segs[6]['start']}")
+    except Exception as e:
+        session.GROQ_UPLOAD_LIMIT, session.CHUNK_SECONDS = orig_limit, orig_chunk
+        check("S5 chunking runs", False, str(e))
+
+    # --- Scenario 6: server drops connection -> connection-error hint
+    MockHandler.mode = "drop"
+    MockHandler.hits.clear()
+    wav4 = tmp / "audio4.wav"
+    make_wav(wav4, 2.0)
+    try:
+        session._transcribe_audio(
+            {"base_url": base, "api_key": "k", "model": "whisper-1"},
+            wav4, tmp / "t6.srt", log,
+        )
+        check("S6 drop raises", False, "expected RuntimeError")
+    except RuntimeError as e:
+        msg = str(e)
+        check("S6 drop raises RuntimeError", True)
+        check("S6 says connection error", "connection error" in msg.lower())
+        check("S6 does NOT say 'does not support'", "does not support" not in msg)
+        print(f"    DEBUG S6 detail={msg[-140:]!r}")
+
     # --- Regression: parse_srt_segments + cut_video_section still work
     srt_file = tmp / "sample.srt"
     srt_file.write_text(SRT_SAMPLE, encoding="utf-8")
@@ -170,7 +242,6 @@ def main():
     check("REG parse_srt_segments 3 items", len(segs) == 3)
     check("REG seg2 start 1.5", abs(segs[1]["start"] - 1.5) < 1e-6)
 
-    import subprocess
     ff = "ffmpeg"
     vid = tmp / "src.mp4"
     subprocess.run([ff, "-y", "-hide_banner", "-loglevel", "error",
@@ -183,7 +254,6 @@ def main():
     check("REG cut output exists", out.exists())
     probe = subprocess.run([ff, "-hide_banner", "-i", str(out)], capture_output=True, text=True)
     dur = 0.0
-    import re
     m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", probe.stderr or "")
     if m:
         h, mi, s = m.groups()
