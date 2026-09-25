@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from .constants import resolve_output_language
 from .helpers import debug_log, get_ffmpeg_path
@@ -32,6 +33,36 @@ MAX_UPLOAD_SECONDS = 300  # transcribe longer audio as <=5-min requests
 CHUNK_SECONDS = 300
 MIN_SPLIT_SECONDS = 45  # below this a failing piece is not worth splitting
 MAX_SPLIT_DEPTH = 3  # 300 -> 150 -> 75 -> 45 s worst case
+
+# v2.0.86: connectivity retries are deliberately more patient than the old
+# fixed 2 attempts / 4 s. A DNS or route hiccup on this machine's flaky
+# network usually clears within ~30 s, and a 5-minute clip costs 9 chunks of
+# work, so it is worth waiting rather than failing the whole session. Backoff
+# is exponential (5, 10, 20 s) so we stop hammering early on a hard block.
+NET_RETRY_ATTEMPTS = 4
+NET_RETRY_BASE_WAIT = 5
+
+
+class NetworkUnreachable(RuntimeError):
+    """The provider host could not be reached at all (DNS/route/refused).
+
+    Distinct from "the provider was too slow for this payload": no bytes were
+    ever sent, so neither a smaller chunk nor a lighter model can help. The
+    sidecar surfaces this verbatim instead of blaming the model.
+    """
+
+
+def base_url_hint(detail: str) -> str:
+    """Short, non-technical tail for a connectivity error message."""
+    return detail.split(": ", 1)[-1][:160] if detail else "tidak diketahui"
+
+
+def host_of(url: str) -> str:
+    """Hostname out of a base URL, for error messages the user can act on."""
+    try:
+        return urlparse(url).hostname or url
+    except ValueError:
+        return url
 
 # whisper-large-v3 is ~4x slower than large-v3-turbo (Groq's own docs call
 # turbo "optimized for speed"). The same request that times out on large-v3
@@ -334,6 +365,74 @@ def _is_too_large(exc: BaseException) -> bool:
     return isinstance(exc, APIStatusError) and getattr(exc, "status_code", None) == 413
 
 
+def _iter_causes(exc: BaseException, limit: int = 12):
+    """Walk the ``__cause__``/``__context__`` chain of an exception.
+
+    The OpenAI SDK buries the real transport failure several layers down:
+    ``APIConnectionError`` -> ``httpx.ConnectError`` -> ``httpcore.ConnectError``
+    -> the socket error. ``str(APIConnectionError)`` is just "Connection error."
+    so any diagnosis has to look at the chain, not the top-level message.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and len(seen) < limit:
+        if id(cur) in seen:
+            break
+        seen.add(id(cur))
+        yield cur
+        nxt = cur.__cause__ or cur.__context__
+        cur = nxt if isinstance(nxt, BaseException) else None
+
+
+# Markers that appear in an actual error MESSAGE and carry diagnostic value.
+# Prefer these: they are what the user can act on.
+_NETWORK_MESSAGE_MARKERS = (
+    "getaddrinfo",            # socket.gaierror on Windows
+    "name or service not known",
+    "temporary failure in name resolution",
+    "nodename nor servname",
+    "connection refused",
+    "network is unreachable",
+    "no route to host",
+    "errno 11001",           # Windows EAI_NONAME
+    "errno -2",              # glibc EAI_NONAME
+    "errno -3",              # glibc EAI_AGAIN
+    "errno 11002",           # Windows EAI_FAIL
+)
+
+# Weaker signals, matched against the exception TYPE NAME only. A
+# `httpx.ConnectError` / `httpcore.ConnectError` in the chain does mean the
+# connection was never established, but its own message ("connect error")
+# tells the user nothing, so it is only used as a fallback and reported with
+# the deeper layers' text when available.
+_NETWORK_TYPE_MARKERS = ("connecterror",)
+
+
+def _network_failure_detail(exc: BaseException) -> str | None:
+    """Return a short human reason if this is a connectivity/DNS failure.
+
+    ``None`` means the failure is NOT connectivity-related (e.g. the provider
+    genuinely closed an over-long request), so the caller may still split.
+
+    Prefers the deepest concrete MESSAGE match. Scanning outermost-first and
+    returning the first hit produced "httpx.ConnectError: connect error",
+    which is technically true and completely useless to the reader.
+    """
+    concrete: str | None = None
+    weak: str | None = None
+    for err in _iter_causes(exc):
+        msg = str(err).strip()
+        rendered = f"{type(err).__name__}: {msg}".strip()
+        haystack = msg.lower()
+        if any(m in haystack for m in _NETWORK_MESSAGE_MARKERS):
+            concrete = rendered[:180]      # deepest wins
+        elif weak is None and any(
+            m in type(err).__name__.lower() for m in _NETWORK_TYPE_MARKERS
+        ):
+            weak = rendered[:180]
+    return concrete or weak
+
+
 def _transcribe_piece(
     client: Any,
     model: str,
@@ -355,13 +454,21 @@ def _transcribe_piece(
         Retrying the identical payload can never succeed, so we split
         immediately.
 
+    **v2.0.86 — connectivity is NOT a size problem.** A real user report was
+    `httpcore.ConnectError: [Errno 11001] getaddrinfo failed`: pure DNS
+    failure, nothing uploaded. The old code read that as "edge dropped an
+    over-long request" and split 5 min -> 150 s -> 75 s, burning four extra
+    requests that could never succeed, then blamed the model. Halving is now
+    gated on the failure actually looking size-related.
+
     Returns segments relative to ``audio_path``.
     """
     from openai import APIConnectionError, APIStatusError
 
     last_error: Exception | None = None
     reason = "koneksi terputus"
-    for attempt in range(1, 3):
+    net_detail: str | None = None
+    for attempt in range(1, NET_RETRY_ATTEMPTS + 1):
         try:
             srt_text = _transcribe_upload(client, model, audio_path)
             srt_file = audio_path.with_suffix(".srt")
@@ -378,11 +485,30 @@ def _transcribe_piece(
             break
         except APIConnectionError as exc:
             last_error = exc
-            if attempt < 2:
-                wait = 4 * attempt
+            detail = _network_failure_detail(exc)
+            if detail is not None:
+                # Host unreachable / DNS broken. Retrying harder is the only
+                # useful move; the payload size is irrelevant.
+                net_detail = detail
+                if attempt < NET_RETRY_ATTEMPTS:
+                    wait = NET_RETRY_BASE_WAIT * (2 ** (attempt - 1))
+                    log(f"  ⚠️ {label}: provider tidak bisa dihubungi "
+                        f"(retry {attempt}/{NET_RETRY_ATTEMPTS}, tunggu {wait} dtk) "
+                        f"— {detail[:90]}")
+                    time.sleep(wait)
+                    continue
+                break
+            if attempt < NET_RETRY_ATTEMPTS:
+                wait = NET_RETRY_BASE_WAIT * attempt
                 log(f"  ⚠️ {label}: koneksi terputus, ulang dalam {wait} detik "
-                    f"(percobaan {attempt}/2)...")
+                    f"(percobaan {attempt}/{NET_RETRY_ATTEMPTS})...")
                 time.sleep(wait)
+
+    if net_detail is not None:
+        raise NetworkUnreachable(
+            f"Tidak bisa menghubungi provider transkripsi "
+            f"({base_url_hint(net_detail)})"
+        ) from last_error
 
     duration = _probe_duration(ffmpeg_path, audio_path)
     if depth < MAX_SPLIT_DEPTH and duration >= MIN_SPLIT_SECONDS * 2:
@@ -537,6 +663,7 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
     except Exception as exc:
         # Give an actionable message instead of a raw API body. What the
         # failure means depends on the error class / status:
+        #   - NetworkUnreachable → DNS/route refused; nothing was uploaded
         #   - APIConnectionError  → edge dropped an over-long request
         #   - 413                 → provider's body cap is smaller than our piece
         #   - AuthenticationError → bad API key (401)
@@ -549,6 +676,19 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
 
         detail = str(getattr(exc, "body", "") or exc).strip()
         status = getattr(exc, "status_code", None)
+        if isinstance(exc, NetworkUnreachable):
+            # v2.0.86: a real report was `getaddrinfo failed` on chunk 1/9 and
+            # the old text blamed the model's speed and told the user to switch
+            # to turbo. Nothing left the machine, so that advice was useless.
+            raise RuntimeError(
+                f"Tidak ada koneksi ke provider transkripsi ({base_url}). "
+                "DNS atau jaringan ke host itu gagal — BUKAN masalah ukuran "
+                "audio dan BUKAN masalah model, jadi mengganti model tidak "
+                "akan menolong. Cek: (1) internet aktif? (2) DNS bisa "
+                f"resolve {host_of(base_url)}? (3) firewall/VPN/DPI memblokir "
+                f"host itu? (4) coba ganti DNS ke 8.8.8.8 atau 1.1.1.1. "
+                "Setelah koneksi kembali, klik ulang — app akan mengulang dari awal."
+            ) from exc
         if isinstance(exc, APIConnectionError):
             raise RuntimeError(
                 "Transcription timeout — provider memutus koneksi saat memproses "
