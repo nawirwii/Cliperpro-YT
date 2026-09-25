@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from .constants import resolve_output_language
 from .helpers import debug_log, get_ffmpeg_path
 from .highlight_finder import find_highlights, parse_requested_ranges
-from . import local_whisper
+from . import heatmap, local_whisper, padding
 from .srt_parser import extract_transcript_for_highlight, parse_srt, parse_srt_segments
 from .subtitle_downloader import download_caption_words, download_subtitle_only
 
@@ -200,6 +200,8 @@ def _ai_highlights(
     output_language: str | None,
     subtitle_language: str | None,
     log: LogFn,
+    duration: float | None = None,
+    hot_ranges: list[tuple[float, float]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Shared AI highlight step for YouTube and local-file sessions."""
     transcript = parse_srt(srt_path)
@@ -217,6 +219,16 @@ def _ai_highlights(
         if exact:
             spans = ", ".join(f"{a:.0f}s-{b:.0f}s" for a, b in exact)
             log(f"Exact time range(s) requested, exempt from the 58-120s rule: {spans}")
+
+    # v2.0.89: the AI heatmap is advisory, never a hard filter. The map is
+    # scored on a truncated window slice, so the selector is still free to pick
+    # something the map missed — we only nudge it toward the hot regions.
+    effective_direction = user_direction
+    hint = heatmap.format_hot_hint(hot_ranges or [])
+    if hint:
+        log(hint)
+        effective_direction = f"{user_direction}\n\n{hint}".strip() if user_direction else hint
+
     highlights, token_usage = find_highlights(
         transcript=transcript,
         video_info=video_info,
@@ -227,7 +239,7 @@ def _ai_highlights(
         system_prompt=ai.get("system_message") or None,
         # None lets find_highlights pick: colder when a direction must be obeyed.
         temperature=ai.get("temperature"),
-        user_direction=user_direction,
+        user_direction=effective_direction,
         output_language=resolved_language,
         log=log,
     )
@@ -244,6 +256,12 @@ def _ai_highlights(
             f"{token_usage.get('completion_tokens', 0)} completion"
         )
 
+    # Padding happens BEFORE the transcript slice below, so transcript_text
+    # describes the boundaries the user will actually watch. Doing it after
+    # would leave the text describing a range we no longer cut.
+    if duration is not None or ai.get("pre_padding") or ai.get("post_padding"):
+        highlights = _apply_padding(highlights, ai, duration, log)
+
     log("Extracting transcript text for each highlight...")
     for h in highlights:
         h["transcript_text"] = extract_transcript_for_highlight(
@@ -251,6 +269,35 @@ def _ai_highlights(
         )
 
     return highlights, token_usage
+
+
+def _apply_padding(
+    highlights: list[dict[str, Any]],
+    ai: dict[str, Any],
+    duration: float | None,
+    log: LogFn,
+) -> list[dict[str, Any]]:
+    """v2.0.89: expand each clip by the configured pre/post padding."""
+    pre = padding.clamp_padding(
+        ai.get("pre_padding"), padding.DEFAULT_PRE_PADDING
+    )
+    post = padding.clamp_padding(
+        ai.get("post_padding"), padding.DEFAULT_POST_PADDING
+    )
+    if pre == 0 and post == 0:
+        return highlights
+
+    log(f"Applying padding: -{pre:g}s / +{post:g}s per clip")
+    padded = padding.apply_padding_to_highlights(
+        highlights, pre, post, duration=duration
+    )
+    clamped = [h for h in padded if h.get("padding_notes", {}).get("padding_dropped")]
+    if clamped:
+        log(
+            f"⚠️ {len(clamped)} klip tidak bisa diberi padding (langka) — "
+            f"batas dipulihkan."
+        )
+    return padded
 
 
 def _probe_local_video(ffmpeg_path: str, video_path: Path, log: LogFn) -> tuple[float, bool]:
@@ -811,6 +858,7 @@ def find_local_highlights_only(
 
     ffmpeg_path = get_ffmpeg_path()
     _duration, has_audio = _probe_local_video(ffmpeg_path, source_copy, log)
+    heatmap_data: list[dict[str, Any]] = []
     if not has_audio:
         log("⚠️ Local video has no audio track — highlights will be limited (empty transcript).")
         srt_path = None
@@ -821,6 +869,33 @@ def find_local_highlights_only(
         _extract_audio(ffmpeg_path, source_copy, wav_path, log)
         srt_path = session_dir / "transcript.srt"
         _transcribe_audio(ai, wav_path, srt_path, log)
+
+        # v2.0.89: score the whole video first, then let the selector cut
+        # precise clips out of the hot regions. Advisory only — a provider
+        # failure here degrades to the old single-pass behaviour.
+        hot_ranges: list[tuple[float, float]] = []
+        if ai.get("use_heatmap", True):
+            try:
+                windows, scores = heatmap.score_windows(
+                    srt_path=str(srt_path),
+                    api_key=ai["api_key"],
+                    base_url=ai.get("base_url", "https://api.openai.com/v1"),
+                    model=ai["model"],
+                    log=log,
+                )
+                hot_ranges = heatmap.hottest_ranges(scores, limit=max(num_clips * 2, 4))
+                heatmap_data = [
+                    {
+                        "index": w["index"],
+                        "start": w["start"],
+                        "end": w["end"],
+                        "score": round(scores.get(w["index"], 0.0), 4),
+                    }
+                    for w in windows
+                ]
+            except Exception as exc:  # never let a nice-to-have kill the run
+                log(f"⚠️ AI heatmap dilewati: {exc}")
+
         highlights, token_usage = _ai_highlights(
             srt_path=str(srt_path),
             num_clips=num_clips,
@@ -830,6 +905,8 @@ def find_local_highlights_only(
             output_language=output_language,
             subtitle_language=None,
             log=log,
+            duration=_duration or None,
+            hot_ranges=hot_ranges,
         )
 
     video_info = _local_video_info(source)
@@ -839,6 +916,7 @@ def find_local_highlights_only(
         "local_video_path": str(source_copy),
         "url": "",
         "srt_path": str(srt_path) if srt_path else None,
+        "heatmap": heatmap_data,
         "subtitle_language": "transcribed",
         "user_direction": (user_direction or "").strip() or None,
         "output_language": (output_language or "auto").strip().lower(),

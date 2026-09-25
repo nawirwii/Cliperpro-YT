@@ -63,6 +63,11 @@ export function CreatePage() {
   const [source, setSource] = useState<"youtube" | "local">("youtube");
   const [localPath, setLocalPath] = useState("");
   const [localFileName, setLocalFileName] = useState("");
+  // v2.0.89: AI heatmap + padding. Padding is clamped HERE as well as in the
+  // sidecar, so the number the user sees is always the number applied.
+  const [useHeatmap, setUseHeatmap] = useState(true);
+  const [prePadding, setPrePadding] = useState(3);
+  const [postPadding, setPostPadding] = useState(5);
   const [clipCount, setClipCount] = useState(5);
   const [subtitleLang, setSubtitleLang] = useState("");
   const [showCookiesDialog, setShowCookiesDialog] = useState(false);
@@ -154,6 +159,15 @@ export function CreatePage() {
 
   const trimmedDirection = userDirection.trim();
 
+  // Mirrors padding.clamp_padding() in the sidecar. An empty field means
+  // "clear it", not "silently become NaN" — Number("") is 0 but Number("abc")
+  // is NaN, and NaN would travel all the way into the ffmpeg command.
+  const clampPad = (raw: string): number => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(30, Math.round(n)));
+  };
+
   const handlePickLocal = useCallback(async () => {
     try {
       const selected = await openDialog({
@@ -218,6 +232,11 @@ export function CreatePage() {
           transcription_base_url: hf.transcriptionBaseUrl?.trim() || undefined,
           transcription_model: hf.transcriptionModel?.trim() || undefined,
           transcription_api_key: hf.transcriptionApiKey?.trim() || undefined,
+          // v2.0.89: only meaningful for the local-file flow, which is the
+          // only one that transcribes and can therefore build a heatmap.
+          pre_padding: prePadding,
+          post_padding: postPadding,
+          use_heatmap: useHeatmap,
         },
       });
       navigate("/processing");
@@ -418,6 +437,70 @@ export function CreatePage() {
                   Audio video akan <b>ditranskripsi otomatis</b> (Whisper via AI provider) untuk
                   deteksi highlight. Captions klip memakai timing dari hasil transkripsi.
                 </span>
+              </div>
+            )}
+
+            {/* v2.0.89: AI heatmap ("Momen Panas") + clip padding.
+                Deliberately named "Momen Panas", not "Most Replayed" — see
+                yt_short_clipper_core/heatmap.py for why the real YouTube
+                heatmap is not available for a local file. */}
+            {source === "local" && (
+              <div className="space-y-3 border border-[var(--color-border-light)] rounded-[var(--radius-sm)] p-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useHeatmap}
+                    onChange={(e) => setUseHeatmap(e.target.checked)}
+                    className="mt-0.5 accent-[var(--color-accent)]"
+                  />
+                  <span className="text-sm font-medium text-[var(--color-text-secondary)]">
+                    🔥 Momen Panas (AI heatmap)
+                  </span>
+                </label>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  AI menilai seluruh video per menit, lalu memotong klip dari bagian yang paling
+                  panas. Ini <b>estimasi AI dari transkrip</b>, bukan data penonton. Video dari
+                  YouTube tidak punya data "Most Replayed" yang bisa dibaca untuk file lokal.
+                </p>
+
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+                      Padding per klip:
+                    </label>
+                    <span className="text-xs text-[var(--color-text-muted)]">
+                      −{prePadding}s / +{postPadding}s
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <span className="text-xs text-[var(--color-text-muted)]">Sebelum (−s)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={30}
+                        value={prePadding}
+                        onChange={(e) => setPrePadding(clampPad(e.target.value))}
+                        className="w-full h-9 px-2 text-sm rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-input)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs text-[var(--color-text-muted)]">Sesudah (+s)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={30}
+                        value={postPadding}
+                        onChange={(e) => setPostPadding(clampPad(e.target.value))}
+                        className="w-full h-9 px-2 text-sm rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-input)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    Memberi jeda agar klip tidak mulai di tengah kalimat. Otomatis dibatasi agar
+                    total durasi klip tidak melebihi 120 detik dan tidak keluar dari video.
+                  </p>
+                </div>
               </div>
             )}
 

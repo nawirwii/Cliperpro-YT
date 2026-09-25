@@ -53,6 +53,19 @@ export interface AIRequestSettings {
   transcription_base_url?: string;
   transcription_model?: string;
   transcription_api_key?: string;
+  /**
+   * v2.0.89: seconds added before/after each clip so a moment does not start
+   * mid-sentence. Applied inside the 120s clip cap and clamped to the source
+   * video, so a large value can never produce an uncuttable range.
+   */
+  pre_padding?: number;
+  post_padding?: number;
+  /**
+   * v2.0.89: score the whole video first, then cut clips from the hot
+   * regions. Advisory — a provider failure falls back to single-pass
+   * selection, so this only ever changes clip quality, never success.
+   */
+  use_heatmap?: boolean;
 }
 
 export type FindHighlightsEvent = { type: "log"; message: string };
