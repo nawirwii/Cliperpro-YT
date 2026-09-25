@@ -33,6 +33,21 @@ CHUNK_SECONDS = 300
 MIN_SPLIT_SECONDS = 45  # below this a failing piece is not worth splitting
 MAX_SPLIT_DEPTH = 3  # 300 -> 150 -> 75 -> 45 s worst case
 
+# whisper-large-v3 is ~4x slower than large-v3-turbo (Groq's own docs call
+# turbo "optimized for speed"). The same request that times out on large-v3
+# can pass on turbo, so slow models get shorter pieces up front instead of
+# waiting for the first disconnect.
+SLOW_MODELS = ("whisper-large-v3", "whisper-1")
+SLOW_MODEL_CHUNK_SECONDS = 150  # 2.5-min pieces for large-v3 / whisper-1
+
+
+def _chunk_seconds_for(model: str) -> int:
+    """Shorter pieces for slow models; same value for turbo-class models."""
+    name = (model or "").lower()
+    if name in SLOW_MODELS or "large-v3" in name and "turbo" not in name:
+        return SLOW_MODEL_CHUNK_SECONDS
+    return CHUNK_SECONDS
+
 
 def find_highlights_only(
     url: str,
@@ -364,11 +379,14 @@ def _transcribe_piece(
     )
 
 
-def _chunk_label() -> str:
-    """Human label for the piece length ("5 menit" / "45 detik")."""
-    if CHUNK_SECONDS % 60 == 0:
-        return f"{CHUNK_SECONDS // 60} menit"
-    return f"{CHUNK_SECONDS} detik"
+def _chunk_label(seconds: int | None = None) -> str:
+    """Human label for a piece length ("5 menit" / "2 menit 30 detik")."""
+    total = CHUNK_SECONDS if seconds is None else int(seconds)
+    if total % 60 == 0:
+        return f"{total // 60} menit"
+    if total > 60:
+        return f"{total // 60} menit {total % 60} detik"
+    return f"{total} detik"
 
 
 def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: LogFn) -> None:
@@ -432,8 +450,10 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
 
         size = mp3_path.stat().st_size
         duration = _probe_duration(get_ffmpeg_path(), mp3_path)
+        chunk_seconds = _chunk_seconds_for(model)
+        max_seconds = min(MAX_UPLOAD_SECONDS, chunk_seconds)
         too_big = size > GROQ_UPLOAD_LIMIT
-        too_long = duration > MAX_UPLOAD_SECONDS
+        too_long = duration > max_seconds
         if not too_big and not too_long:
             log(f"Transcribing audio with {model} via {base_url} "
                 f"({size / 1024 / 1024:.1f} MB, {duration:.0f}s)...")
@@ -447,15 +467,18 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
             reason.append(f"durasi {duration / 60:.1f} menit")
         if too_big:
             reason.append(f"ukuran {size / 1024 / 1024:.1f} MB")
+        if chunk_seconds < CHUNK_SECONDS:
+            log(f"ℹ️ Model '{model}' ~4x lebih lambat dari 'whisper-large-v3-turbo' "
+                f"→ pakai potongan lebih pendek.")
         log(f"Audio {' dan '.join(reason)} melebihi batas upload — memecah menjadi "
-            f"bagian {_chunk_label()} agar tidak timeout...")
+            f"bagian {_chunk_label(chunk_seconds)} agar tidak timeout...")
         chunk_dir = wav_path.parent / "chunks"
         if chunk_dir.exists():
             shutil.rmtree(chunk_dir)  # stale chunks from a previous run
         chunk_dir.mkdir(parents=True, exist_ok=True)
         _run_ffmpeg([
             get_ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(mp3_path), "-f", "segment", "-segment_time", str(CHUNK_SECONDS),
+            "-i", str(mp3_path), "-f", "segment", "-segment_time", str(chunk_seconds),
             "-reset_timestamps", "1", "-c:a", "libmp3lame", "-b:a", "64k",
             str(chunk_dir / "chunk_%03d.mp3"),
         ])
@@ -465,7 +488,7 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
 
         segments: list[dict[str, Any]] = []
         for i, chunk in enumerate(chunks):
-            offset = i * CHUNK_SECONDS
+            offset = i * chunk_seconds
             log(f"Transcribing chunk {i + 1}/{len(chunks)} ({chunk.name})...")
             for seg in _transcribe_piece(
                 client, model, get_ffmpeg_path(), chunk, log,
@@ -493,10 +516,11 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
             raise RuntimeError(
                 "Transcription timeout — provider memutus koneksi saat memproses "
                 "audio. App sudah mengompres (MP3 64k mono) dan memecah audio jadi "
-                f"bagian {_chunk_label()}, lalu mencoba membagi lagi "
-                "otomatis. Usually 1 dari 2 penyebab: (1) model terlalu berat untuk "
-                "durasi video — coba model 'whisper-large-v3-turbo' (lebih cepat, "
-                "hampir sama akuratnya), atau (2) koneksi ke provider tidak stabil "
+                f"bagian {_chunk_label(_chunk_seconds_for(model))}, lalu mencoba "
+                "membagi lagi otomatis. Usually 1 dari 2 penyebab: (1) model terlalu "
+                "berat untuk durasi video — coba model 'whisper-large-v3-turbo' "
+                "(lebih cepat, hampir sama akuratnya), atau (2) koneksi ke provider "
+                "tidak stabil"
                 f"— cek {base_url} lalu coba lagi. Details: {str(exc)[:200]}"
             ) from exc
         if isinstance(exc, AuthenticationError):
