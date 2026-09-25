@@ -322,6 +322,18 @@ def _transcribe_upload(client: Any, model: str, audio_path: Path) -> str:
     return text
 
 
+def _is_too_large(exc: BaseException) -> bool:
+    """True for HTTP 413 from any provider.
+
+    The OpenAI SDK does NOT map 413 onto ``BadRequestError`` — it raises the
+    generic ``APIStatusError`` — so this must be checked via ``status_code``,
+    never via ``isinstance(exc, BadRequestError)``.
+    """
+    from openai import APIStatusError
+
+    return isinstance(exc, APIStatusError) and getattr(exc, "status_code", None) == 413
+
+
 def _transcribe_piece(
     client: Any,
     model: str,
@@ -331,24 +343,39 @@ def _transcribe_piece(
     label: str,
     depth: int = 0,
 ) -> list[dict[str, Any]]:
-    """Upload one audio piece, retrying and then halving it on dropped connections.
+    """Upload one audio piece; on a dropped connection OR an explicit 413,
+    halve it and transcribe each half.
 
-    Providers behind a CDN (Cloudflare and friends) close idle/over-long
-    requests without a response, which surfaces as
-    ``APIConnectionError: Server disconnected without sending a response``.
-    Retrying the same file can hit the same wall, so after a few tries we cut
-    the piece in half and transcribe each half — smaller payload and shorter
-    server-side processing time. Returns segments relative to ``audio_path``.
+    Two distinct server-side refusals, one remedy — a smaller piece:
+      * ``APIConnectionError`` — the provider edge (Cloudflare and friends)
+        closes over-long requests without a response, surfacing as
+        ``APIConnectionError: Server disconnected without sending a response``.
+        Transient, so one retry first.
+      * **HTTP 413** — the provider's body cap is smaller than this piece.
+        Retrying the identical payload can never succeed, so we split
+        immediately.
+
+    Returns segments relative to ``audio_path``.
     """
-    from openai import APIConnectionError
+    from openai import APIConnectionError, APIStatusError
 
     last_error: Exception | None = None
+    reason = "koneksi terputus"
     for attempt in range(1, 3):
         try:
             srt_text = _transcribe_upload(client, model, audio_path)
             srt_file = audio_path.with_suffix(".srt")
             srt_file.write_text(srt_text, encoding="utf-8")
             return parse_srt_segments(str(srt_file))
+        except APIStatusError as exc:
+            if not _is_too_large(exc):
+                raise
+            # Explicit "too large": the piece itself is the problem.
+            last_error, reason = exc, "file ditolak terlalu besar (413)"
+            size_mb = audio_path.stat().st_size / 1024 / 1024
+            log(f"  ⚠️ {label}: {reason} — {size_mb:.1f} MB, "
+                "membelah langsung tanpa mengulang...")
+            break
         except APIConnectionError as exc:
             last_error = exc
             if attempt < 2:
@@ -360,7 +387,7 @@ def _transcribe_piece(
     duration = _probe_duration(ffmpeg_path, audio_path)
     if depth < MAX_SPLIT_DEPTH and duration >= MIN_SPLIT_SECONDS * 2:
         half = duration / 2
-        log(f"  ⚠️ {label}: masih terputus — membagi menjadi 2 bagian "
+        log(f"  ⚠️ {label}: {reason} — membagi menjadi 2 bagian "
             f"({half:.0f} detik) lalu mencoba lagi...")
         segments: list[dict[str, Any]] = []
         for i, start in enumerate((0.0, half)):
@@ -489,7 +516,11 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
         segments: list[dict[str, Any]] = []
         for i, chunk in enumerate(chunks):
             offset = i * chunk_seconds
-            log(f"Transcribing chunk {i + 1}/{len(chunks)} ({chunk.name})...")
+            # Always name the endpoint + piece size: when a provider refuses a
+            # chunk (413/400) this line is the only place that proves WHICH
+            # endpoint rejected it and how big the payload actually was.
+            log(f"Transcribing chunk {i + 1}/{len(chunks)} ({chunk.name}, "
+                f"{chunk.stat().st_size / 1024 / 1024:.1f} MB) via {base_url}...")
             for seg in _transcribe_piece(
                 client, model, get_ffmpeg_path(), chunk, log,
                 f"chunk {i + 1}/{len(chunks)}",
@@ -505,13 +536,19 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
         raise
     except Exception as exc:
         # Give an actionable message instead of a raw API body. What the
-        # failure means depends on the error class:
-        #   - APIConnectionError  → upload dropped (file too big / network)
+        # failure means depends on the error class / status:
+        #   - APIConnectionError  → edge dropped an over-long request
+        #   - 413                 → provider's body cap is smaller than our piece
         #   - AuthenticationError → bad API key (401)
-        #   - BadRequestError     → endpoint does not implement transcription
-        from openai import APIConnectionError, AuthenticationError, BadRequestError
+        #   - 400/404/405/422     → endpoint does not implement transcription
+        # Do NOT use isinstance(exc, BadRequestError) for 413: the OpenAI SDK
+        # raises a plain APIStatusError for that status, so the check silently
+        # never fires and every 413 used to be mislabelled as "endpoint does
+        # not support audio transcription" (v2.0.80 bug, real user report).
+        from openai import APIConnectionError, APIStatusError, AuthenticationError
 
         detail = str(getattr(exc, "body", "") or exc).strip()
+        status = getattr(exc, "status_code", None)
         if isinstance(exc, APIConnectionError):
             raise RuntimeError(
                 "Transcription timeout — provider memutus koneksi saat memproses "
@@ -529,17 +566,28 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
                 "Settings → AI Model → Transcription "
                 f"(Groq: https://console.groq.com). Details: {detail[:300]}"
             ) from exc
-        if isinstance(exc, BadRequestError) and getattr(exc, "status_code", None) == 413:
+        if _is_too_large(exc):
             raise RuntimeError(
-                "Transcription file terlalu besar — provider menerima maks "
-                "~25 MB per upload."
+                f"Provider menolak file sebagai terlalu besar (HTTP 413) — batas "
+                f"body {base_url} lebih kecil dari potongan audio kita. App sudah "
+                "mencoba memecah dan membelah otomatis; jika tetap gagal, pakai "
+                "endpoint yang limit-nya lebih besar (mis. Groq "
+                "https://api.groq.com/openai/v1, maks ~25 MB) atau pilih model "
+                "'whisper-large-v3-turbo'."
+                f" Details: {detail[:300]}"
+            ) from exc
+        if isinstance(exc, APIStatusError) and status in (400, 404, 405, 422, 501):
+            raise RuntimeError(
+                f"Endpoint {base_url} tidak mendukung /audio/transcriptions "
+                f"(HTTP {status}). Di Settings → AI Model → Transcription, isi "
+                "Base URL + model Whisper, contoh: "
+                "https://api.groq.com/openai/v1 dengan whisper-large-v3-turbo, "
+                f"atau https://api.openai.com/v1 dengan whisper-1. "
+                f"Details: {detail[:300]}"
             ) from exc
         raise RuntimeError(
-            "Transcription failed — this AI endpoint does not support "
-            "audio transcription. In Settings → AI Model, fill in "
-            "'Transcription Base URL' (e.g. https://api.openai.com/v1 with "
-            "model whisper-1, or https://api.groq.com/openai/v1 with "
-            f"whisper-large-v3-turbo). Details: {detail[:300]}"
+            f"Transcription gagal (HTTP {status}) — cek {base_url} dan model "
+            f"{model}. Details: {detail[:300]}"
         ) from exc
 
 

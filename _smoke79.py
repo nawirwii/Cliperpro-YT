@@ -6,6 +6,7 @@ longer than LIMIT_SECONDS, emulating a provider edge that gives up on
 long-running transcriptions. The client must split down until pieces are short
 enough, and still merge a correct SRT.
 """
+import json
 import re
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from yt_short_clipper_core import session as S  # noqa: E402
 
 FF = S.get_ffmpeg_path()
+LAST_ERR = ""
 ROOT = Path("/tmp/smoke79")
 LIMIT_SECONDS = 180.0  # mock edge refuses anything longer than this
 PASS, FAIL = [], []
@@ -40,6 +42,8 @@ def make_wav(path, seconds):
 class Handler(BaseHTTPRequestHandler):
     uploads = []          # (filename, nbytes)
     drops = 0
+    too_large = 0         # HTTP 413 responses served
+    size_cap_bytes = 0    # 0 = disabled; reject any upload above this
 
     def log_message(self, *a):
         pass
@@ -77,6 +81,24 @@ class Handler(BaseHTTPRequestHandler):
         # Real duration of the uploaded audio: mock edge refuses long jobs,
         # exactly like a provider whose proxy times out during transcription.
         dur = self._file_duration(body)
+        # Emulate a provider whose request-body cap is smaller than our piece.
+        # Returns a real 413 (not a dropped socket), which is exactly what the
+        # user hit: the SDK raises APIStatusError, NOT BadRequestError.
+        if Handler.size_cap_bytes and len(body) > Handler.size_cap_bytes:
+            Handler.too_large += 1
+            payload = json.dumps({
+                "error": {
+                    "message": "Request Entity Too Large",
+                    "type": "invalid_request_error",
+                    "code": "request_too_large",
+                }
+            }).encode()
+            self.send_response(413)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if dur > LIMIT_SECONDS:
             Handler.drops += 1
             self.close_connection = True   # drop without response
@@ -104,6 +126,7 @@ def run_case(title, wav_seconds, chunk_seconds, expect_ok=True,
     make_wav(wav, wav_seconds)
 
     Handler.uploads, Handler.drops = [], 0
+    Handler.too_large = 0
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_port}/v1"
@@ -127,6 +150,8 @@ def run_case(title, wav_seconds, chunk_seconds, expect_ok=True,
     except Exception as e:  # noqa: BLE001
         ok = False
         err = str(e)[:220]
+        global LAST_ERR
+        LAST_ERR = str(e)
     finally:
         S.CHUNK_SECONDS, S.MAX_UPLOAD_SECONDS = old_chunk, old_max
         S._chunk_seconds_for = old_for
@@ -197,6 +222,28 @@ def main():
     up, drops = run_case("S6_turbo", 200, 300, model="whisper-large-v3-turbo", pin=False)
     check("S6_turbo: exactly 1 upload", len(up) == 1, f"n={len(up)} names={[n for n,_ in up]}")
     check("S6_turbo: no drops", drops == 0, f"drops={drops}")
+
+    # S7: provider returns a real HTTP 413 (body cap smaller than our piece).
+    # The app must halve WITHOUT retrying the identical payload, and recover.
+    Handler.size_cap_bytes = 700_000   # ~2.5 min of 64k MP3 fits, 5 min does not
+    LIMIT_SECONDS = 100_000.0          # disable the timeout-drop path
+    up, drops = run_case("S7_413", 300, 300, model="whisper-large-v3-turbo", pin=True)
+    check("S7_413: server did answer 413", Handler.too_large >= 1, f"n={Handler.too_large}")
+    check("S7_413: recovered via halves", any("_p0" in n for n, _ in up),
+          f"names={[n for n, _ in up]}")
+    check("S7_413: no socket drops (only 413s)", drops == 0, f"drops={drops}")
+    Handler.size_cap_bytes = 0
+
+    # S8: 413 that cannot be fixed by halving (tiny cap) → friendly message
+    # that blames the 413, NOT "endpoint does not support transcription".
+    Handler.size_cap_bytes = 1
+    Handler.too_large = 0
+    LIMIT_SECONDS = 100_000.0
+    run_case("S8_413_hopeless", 60, 300, expect_ok=False, pin=False)
+    Handler.size_cap_bytes = 0
+    check("S8: message blames 413", "413" in LAST_ERR, LAST_ERR[:160])
+    check("S8: NOT the bogus 'does not support' text",
+          "does not support audio transcription" not in LAST_ERR, LAST_ERR[:160])
 
     # Pure helpers: model-aware piece length + human label.
     check("_chunk_seconds_for turbo = 300",
