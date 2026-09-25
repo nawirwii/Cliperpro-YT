@@ -39,6 +39,9 @@ check("no single-attempt cache branch",
       "the old if/elif made a 1-item ladder")
 check("builds full hw_attempts list", "hw_attempts" in src)
 check("mf still appended", 'hw_attempts.append(("mf"' in src)
+check("proven probe-style shape tried BEFORE fragile hwupload",
+      src.index('("probe-style"') < src.index('("hwupload"'),
+      "gpu.py's runtime probe already proved probe-style on this hardware")
 
 print("\n=== 2. cache reorders, never truncates ===")
 check("cache only reorders",

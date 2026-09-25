@@ -288,9 +288,16 @@ def combine_split_screen(
     # straight to CPU, so a session that was working on earlier clips lost its
     # GPU entirely. Now the cache only reorders the ladder; every other
     # hardware shape is still tried before falling back to software.
+    #
+    # Order rationale (v2.0.84): "probe-style" goes FIRST because the comment
+    # block above records that it is the shape gpu.py's runtime probe used
+    # and that command already succeeds on this class of machine, while the
+    # explicit `format=nv12,hwupload=extra_hw_frames=64` graph is the one
+    # that blows up at frame=0 on some iGPU drivers. Trying the proven shape
+    # first means most sessions never touch the fragile one at all.
     hw_attempts: list[tuple[str, list[str], list[str], list[str]]] = [
-        ("hwupload", qsv_head, qsv_graph, video_enc_args),
         ("probe-style", qsv_head, cpu_graph, video_enc_args),
+        ("hwupload", qsv_head, qsv_graph, video_enc_args),
     ]
     if is_mf_available:
         hw_attempts.append(("mf", [], cpu_graph, mf_enc_args))
