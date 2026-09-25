@@ -1,6 +1,6 @@
 {
   "identifier": "com.jipraks.ytshortclipper-v2",
-  "version": "2.0.81",
+  "version": "2.0.82",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173"
@@ -41,6 +41,7 @@
     "resources": {
       "binaries/ffmpeg/ffmpeg.exe": "ffmpeg/ffmpeg.exe",
       "binaries/bin/deno.exe": "bin/deno.exe",
+      "binaries/bin/aria2c.exe": "bin/aria2c.exe",
       "binaries/models/face_landmarker.task": "models/face_landmarker.task",
       "fonts/*": "fonts/"
     },

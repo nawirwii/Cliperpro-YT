@@ -8,11 +8,84 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .cookies import validate_cookies
-from .helpers import debug_log, get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
+from .helpers import debug_log, get_aria2c_path, get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from .helpers import _get_app_dir
 from .gpu import build_video_enc_args
 
 LogFn = Callable[[str], None]
+
+# Shared by http and https so there is a single source of truth for the
+# aria2c tuning (see _build_downloader_opts for what each flag buys).
+_ARIA2_ARGS = [
+    "-x16",                    # max 16 connections per server
+    "-s16",                    # split into 16 pieces
+    "-j16",                    # 16 parallel downloads
+    "-k1M",                    # only split files larger than 1 MiB
+    "--file-allocation=none",  # no sparse pre-allocation
+    "--summary-interval=0",    # silence aria2's own status line
+    "--no-conf",               # ignore a stray user aria2.conf
+]
+
+# Sustained-throttle abort thresholds. 40 KiB/s is ~2x below the 100 KiB/s
+# warning line and was the worst speed seen live (log: 63 KiB/s), so this
+# only fires when a download is genuinely crawling. At 40 KiB/s a 47 MiB
+# file needs ~20 min — aborting and re-rolling the client is far better.
+_SUSTAINED_THROTTLE_BPS = 40 * 1024
+_SUSTAINED_THROTTLE_SECS = 60
+
+# Player clients to try, in order. Each is JS-less (no po_token challenge),
+# and YouTube treats them as separate identities — so when one gets capped,
+# the next often does not. Ordered by how reliably they return stream
+# info without a JS runtime; the first entry is the default.
+_CLIENT_LADDER: list[list[str]] = [
+    ["visionos", "ios", "android", "tv_downgraded"],
+    ["ios", "android", "mweb", "web_safari"],
+    ["android", "tv_downgraded", "web_embedded"],
+]
+
+
+class _SustainedThrottle(RuntimeError):
+    """Download was crawling for so long that waiting it out is pointless.
+
+    Raised only from the watchdog, and only after the progress hook has
+    confirmed sustained sub-threshold speed. It is deliberately NOT a
+    generic failure: it tells ``_do_download`` to retry the whole
+    extraction with a different player client, because YouTube's cap is
+    decided per client/URL and a different client often flies.
+    """
+
+
+def _sustained_throttle_check(d: dict, state: dict, log: LogFn) -> None:
+    """Track how long the download has been crawling.
+
+    At 40 KiB/s a 47 MiB video needs ~20 minutes, so after
+    ``_SUSTAINED_THROTTLE_SECS`` of being that slow the honest move is to
+    stop and re-roll the client instead of waiting. The threshold is
+    deliberately far below the 100 KiB/s the warning uses, so this only
+    fires on links that are genuinely not moving.
+    """
+    if d.get("status") != "downloading":
+        return
+    speed = d.get("speed")
+    if not speed:
+        return
+    now = time.monotonic()
+    if speed < _SUSTAINED_THROTTLE_BPS:
+        first = state.get("throttle_since")
+        if first is None:
+            state["throttle_since"] = now
+            state["throttle_since_speed"] = speed
+        elif now - first >= _SUSTAINED_THROTTLE_SECS:
+            state["sustained_throttle"] = True
+            log(
+                f"🐌 Download meringkek {int(speed / 1024)} KiB/s selama "
+                f"{int(now - first)}s — membatalkan untuk mencoba client "
+                "YouTube lain (cap throttle decided per client)."
+            )
+    else:
+        # Recovered (or a false alarm) — clear the timer so the window restarts.
+        state["throttle_since"] = None
+        state["sustained_throttle"] = False
 
 
 def _parse_timestamp(ts: str) -> float:
@@ -20,6 +93,56 @@ def _parse_timestamp(ts: str) -> float:
     ts = ts.replace(",", ".")
     parts = ts.split(":")
     return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+
+
+def _build_downloader_opts(aria2_path: str | None, log: LogFn) -> dict[str, Any]:
+    """Build ``external_downloader`` opts for yt-dlp.
+
+    Returns ``{}`` when aria2c is unavailable — yt-dlp then uses its native
+    downloader, which still works, just single-connection. That silent
+    fallback matters: aria2c is a bundled convenience, never a hard
+    dependency, so a missing/corrupt binary must not break downloading.
+
+    Why aria2c and not more ``concurrent_fragment_downloads``: that option
+    only splits *fragmented* streams (dash/hls). Our format is a
+    progressive MP4, so there is nothing for it to parallelise.
+    aria2c instead issues N concurrent HTTP **range** requests for a single
+    file, which is exactly what defeats a per-connection speed cap.
+
+    Args tuned for a throttled consumer line rather than raw maximum
+    bandwidth:
+      ``-x 16``  up to 16 connections per server
+      ``-s 16``  16 splits (the piece actually downloaded in parallel)
+      ``-j 16``  16 parallel downloads (video+audio run together)
+      ``-k 1M``  only split files above 1 MiB; smaller chunks waste
+                 round-trips and look more like abuse
+      ``--file-allocation=none``  don't pre-create a sparse file the size
+                 of the whole download (wastes disk on slow connections)
+      ``--summary-interval=0``  aria2's own status line would interleave
+                 with our yt-dlp log; progress comes from our hook
+      ``--no-conf``  ignore any user aria2.conf that could break things
+    """
+    if not aria2_path:
+        log(
+            "ℹ️ aria2c tidak ditemukan — memakai downloader bawaan "
+            "(1 koneksi). Download tetap jalan, tapi lebih lambat saat "
+            "YouTube membatasi koneksi."
+        )
+        return {}
+
+    # yt-dlp resolves an external downloader by protocol key, or 'default'.
+    # Mapping both http and https to the absolute path avoids depending on
+    # aria2c being on PATH inside the packaged app.
+    return {
+        "external_downloader": {
+            "http": aria2_path,
+            "https": aria2_path,
+        },
+        "external_downloader_args": {
+            "http": _ARIA2_ARGS,
+            "https": _ARIA2_ARGS,
+        },
+    }
 
 
 def _build_format_selector(max_height: int) -> str:
@@ -164,6 +287,15 @@ def _maybe_warn_throttled(d: dict, log: LogFn) -> None:
     YouTube's deliberate per-connection cap for non-browser clients (or a
     missing cookies.txt). We surface it once so the user knows what's going
     on instead of watching a crawling percentage.
+
+    v2.0.82: the old message claimed "Mitigations active: parallel
+    fragments (×8)". That was **factually wrong** for our format — yt-dlp's
+    concurrent_fragment_downloads only applies to fragmented dash/hls
+    streams, and we download a plain progressive MP4 with a single
+    connection. The user was told a mitigation was running when nothing was
+    parallelising their download. The message now reports what is actually
+    true, and tells the user where to put cookies.txt instead of vaguely
+    suggesting one.
     """
     speed = d.get("speed")
     if not speed:
@@ -175,11 +307,26 @@ def _maybe_warn_throttled(d: dict, log: LogFn) -> None:
     if _progress_hook_state.get("throttle_warned_ts", 0.0) and now - _progress_hook_state["throttle_warned_ts"] < 60:
         return  # already warned recently
     _progress_hook_state["throttle_warned_ts"] = now
+
+    # NOTE: _get_cookies_path() RAISES when cookies are absent, which is
+    # exactly the case this warning fires in. Never call it unguarded here.
+    try:
+        cookies_path: str | None = _get_cookies_path()
+    except Exception:
+        cookies_path = None
+    if cookies_path:
+        cookies_state = f"✅ cookies.txt terbaca ({cookies_path})"
+    else:
+        where = " atau ".join(str(p) for p in _cookies_search_dirs()[:2])
+        cookies_state = f"⚠️ cookies.txt TIDAK ada — taruh di: {where}"
+    multi = "aktif" if get_aria2c_path() else "TIDAK aktif (aria2c tidak ditemukan)"
     log(
-        f"⚠️ YouTube throttling detected: only {kiB_s:.0f} KiB/s. This is "
-        "YouTube's per-connection cap for non-browser clients, not your "
-        "network. Mitigations active: parallel fragments (×8). Adding a "
-        "cookies.txt from a logged-in YouTube session usually removes the cap."
+        f"⚠️ YouTube membatasi koneksi: hanya {kiB_s:.0f} KiB/s. Ini cap "
+        "per-koneksi YouTube untuk klien non-browser, bukan jaringan Bos. "
+        f"Multi-koneksi: {multi}. {cookies_state}. "
+        "Export cookies dari browser yang sudah login ke YouTube (ekstensi "
+        "'Get cookies.txt LOCALLY') lalu taruh di folder aplikasi — ini "
+        "mitigasi paling handal karena request terautentikasi tidak kena cap."
     )
 
 
@@ -261,6 +408,34 @@ def _get_cookies_path() -> str:
     except Exception:
         pass
     raise RuntimeError("cookies.txt not found. Please upload cookies first.")
+
+
+def _cookies_search_dirs() -> list[Path]:
+    """Every directory cookies.txt is looked for in, most specific last.
+
+    Mirrors the search order in ``_get_cookies_path`` but returns the
+    directories instead of throwing, so it is safe to call from the
+    throttle warning (which fires exactly when cookies are often missing).
+    """
+    dirs: list[Path] = []
+    for d in (Path.cwd(), _get_app_dir()):
+        # cwd and the app dir are the same folder for a portable install,
+        # which would otherwise print the same path twice in the hint.
+        if d and d not in dirs:
+            dirs.append(d)
+    try:
+        import platform
+        if platform.system() == "Windows":
+            data_dir = Path(os.environ.get("APPDATA", ""))
+        elif platform.system() == "Darwin":
+            data_dir = Path.home() / "Library" / "Application Support"
+        else:
+            data_dir = Path.home() / ".config"
+        if str(data_dir):
+            dirs.append(data_dir / "com.jipraks.ytshortclipper-v2")
+    except Exception:
+        pass
+    return dirs
 
 
 def cut_video_section(
@@ -436,10 +611,27 @@ def _download_section_module(
         # stalls on throttled links with NO progress-hook activity → the app's
         # own watchdog aborts. Kept full-download + local cut as primary;
         # ranges may return as an option in a future release after testing.
-        # Parallel fragment connections: YouTube throttles non-browser
-        # clients per-connection (~a few hundred B/s). Browsers open many
-        # parallel connections; we mimic that to bypass the per-connection cap.
+        # Parallel fragment connections — ONLY meaningful for fragmented
+        # transports. YouTube's `bestvideo+bestaudio` is a plain progressive
+        # MP4 (one file, one connection), so this option is a NO-OP for our
+        # format. It stays because it does help if an HLS/DASH format is ever
+        # selected, but the REAL per-connection defence is aria2c below
+        # (v2.0.82) — see _build_downloader_opts.
         "concurrent_fragment_downloads": 8,
+        # Anti-throttle flags (v2.0.82):
+        #  - throttled_rate: if the measured speed falls below this, yt-dlp
+        #    assumes server-side throttling and RE-EXTRACTS the video, which
+        #    gets fresh CDN URLs. The single most effective no-dependency
+        #    mitigation: throttling is a per-URL/per-session decision, so new
+        #    URLs often escape it.
+        #  - sleep_interval: pace the extractor requests so a burst of
+        #    downloads doesn't get our IP flagged in the first place.
+        # 100 KiB/s is well below a healthy Indonesian line but well above
+        # the 1-99 KiB/s we measured under the cap, so it only fires when
+        # something is actually wrong.
+        "throttled_rate": 100 * 1024,
+        "sleep_interval": 1.0,
+        "max_sleep_interval": 5.0,
         # Fail fast on dead connections (ISP NAT drops, throttled YouTube):
         "socket_timeout": 10,
         "retries": 3,
@@ -466,16 +658,23 @@ def _download_section_module(
         # downloads hand the network I/O to FFmpegFD (ffmpeg, single
         # connection), and YouTube throttles non-browser clients per-connection
         # (~10-20 KiB/s on Indonesian lines — an 85s section would take hours).
-        # Native download + concurrent_fragment_downloads=8 opens 8 parallel
-        # connections, bypassing the per-connection cap (measured ~100-190
-        # KiB/s, 6-11x faster on the same throttle). The section is cut locally
-        # afterwards with ffmpeg -c copy (no network involved).
+        # Full download + local cut stays the primary path. The per-connection
+        # cap is handled by aria2c above (real multi-connection); the section
+        # is then cut locally with ffmpeg -c copy (no network involved).
         "cookiefile": cookies_path,
         "logger": _YTDlpLogger(log, download_state),
         "progress_hooks": [
             lambda d: _yt_dlp_progress_hook(d, log)
         ],
     }
+
+    # Multi-connection downloader (v2.0.82). Added last so it overrides
+    # nothing above; returns {} when aria2c is absent (native fallback).
+    aria2_path = get_aria2c_path()
+    ydl_opts.update(_build_downloader_opts(aria2_path, log))
+    if aria2_path:
+        log("⚡ Multi-connection aktif (aria2c, 16 koneksi) — ini yang "
+            "menaklok throttle YouTube per-koneksi.")
 
     deno_path = get_deno_path()
     if deno_path and Path(deno_path).exists():
@@ -506,6 +705,9 @@ def _download_section_module(
         download_state["last_log_ts"] = time.monotonic()
         if download_state["first_activity_ts"] is None:
             download_state["first_activity_ts"] = time.monotonic()
+        # Track sustained crawl so the watchdog can abort and re-roll the
+        # player client (v2.0.82). Cheap: two dict lookups per progress event.
+        _sustained_throttle_check(d, download_state, log)
         if d.get("status") == "downloading":
             pct, detail = _extract_progress(d)
             if pct is not None:
@@ -614,6 +816,16 @@ def _download_section_module(
         dl_thread.start()
         while dl_thread.is_alive():
             if _abort.is_set():
+                if download_state.get("sustained_throttle"):
+                    # Distinct from a stall: the bytes ARE arriving, just far
+                    # too slowly. Callers retry this with another player
+                    # client rather than falling back to a simpler format.
+                    raise _SustainedThrottle(
+                        f"Download ({label}) crawling for "
+                        f"{_SUSTAINED_THROTTLE_SECS}s+ under "
+                        f"{_SUSTAINED_THROTTLE_BPS // 1024} KiB/s — "
+                        "retrying with a different YouTube client."
+                    )
                 raise RuntimeError(
                     f"Download ({label}) aborted: extraction timed out after "
                     f"{_EXTRACT_ABORT}s with no activity. Check your network or try again."
@@ -637,38 +849,74 @@ def _download_section_module(
         )
 
     def _do_download() -> str:
-        """Primary: full native parallel download + local cut → fallback.
+        """Primary: multi-connection full download + local cut → fallback.
 
-        Kept as the tested, reliable path (v2.0.31+): concurrent_fragment_
-        downloads=8 opens parallel connections to bypass YouTube's
-        per-connection throttle, then the section is cut locally with
-        ffmpeg -c copy. Ranged section download was trialled on yt-dlp
-        2026.8.19 but stalls (FFmpegFD, no progress) — see ydl_opts note.
+        Kept as the tested, reliable path (v2.0.31+): download the whole
+        video, then cut the section locally with ffmpeg. Ranged section
+        download was trialled on yt-dlp 2026.8.19 but stalls (FFmpegFD,
+        no progress) — see ydl_opts note.
+
+        v2.0.82 adds a **client ladder**: on sustained throttle we retry the
+        whole download with a different YouTube player client before giving
+        up, because the per-connection cap is decided per client identity.
         """
-        # Retry-on-WinError-32 loop: the final .part → .mp4 rename can fail on
-        # Windows when antivirus / search-indexer briefly locks the file. The
-        # re-download is cheap relative to a stuck session, so retry a few times.
         e_download: Exception | None = None
-        for attempt in range(1, 4):
-            try:
-                _run_download(ydl_opts, f"primary-{attempt}")
-                return _cut_section(_find_downloaded_file(output_path))
-            except Exception as e:
-                e_download = e
-                msg = str(e)
-                rename_locked = (
-                    "Unable to rename file" in msg
-                    or "WinError 32" in msg
-                    or "being used by another process" in msg
+        for client_idx, clients in enumerate(_CLIENT_LADDER):
+            # Reset per-attempt throttle bookkeeping, otherwise a previous
+            # attempt's flag would immediately abort the retry.
+            download_state["throttle_since"] = None
+            download_state["sustained_throttle"] = False
+            # Fresh watchdog for each client attempt.
+            if client_idx > 0:
+                _abort.clear()
+                download_state["first_activity_ts"] = None
+                download_state["download_phase_active"] = False
+                threading.Thread(
+                    target=_extraction_watchdog, daemon=True,
+                    name=f"yt-dlp-watchdog-client{client_idx}",
+                ).start()
+                log(
+                    f"🔄 YouTube membatasi client sebelumnya — mencoba "
+                    f"client {client_idx + 1}/{len(_CLIENT_LADDER)}: "
+                    f"{', '.join(clients)}"
                 )
-                if rename_locked and attempt < 3:
-                    log(
-                        f"⚠️ Rename lock (WinError 32) on attempt {attempt}/3 — "
-                        "file busy (antivirus?), retrying in 5s..."
+
+            client_opts = dict(ydl_opts)
+            client_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": list(clients),
+                    "player_skip": ["js"],
+                },
+            }
+
+            # Retry-on-WinError-32 loop: the final .part → .mp4 rename can
+            # fail on Windows when antivirus briefly locks the file.
+            for attempt in range(1, 4):
+                try:
+                    _run_download(client_opts, f"c{client_idx}-a{attempt}")
+                    return _cut_section(_find_downloaded_file(output_path))
+                except _SustainedThrottle:
+                    # Not a hard failure — break to the next client, but
+                    # keep the exception as e_download so a final failure
+                    # still reports something meaningful.
+                    e_download = RuntimeError("throttled by YouTube")
+                    break
+                except Exception as e:
+                    e_download = e
+                    msg = str(e)
+                    rename_locked = (
+                        "Unable to rename file" in msg
+                        or "WinError 32" in msg
+                        or "being used by another process" in msg
                     )
-                    time.sleep(5)
-                    continue
-                break  # real failure → fallback path below
+                    if rename_locked and attempt < 3:
+                        log(
+                            f"⚠️ Rename lock (WinError 32) on attempt "
+                            f"{attempt}/3 — file busy (antivirus?), retrying in 5s..."
+                        )
+                        time.sleep(5)
+                        continue
+                    break  # real failure → next client / fallback below
 
         msg = str(e_download)
         log(f"Section download failed: {msg[:200]}")

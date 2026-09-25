@@ -195,6 +195,36 @@ def get_deno_path() -> str | None:
     return None
 
 
+def get_aria2c_path() -> str | None:
+    """Get aria2c executable path (multi-connection downloader).
+
+    aria2c is what actually defeats YouTube's per-connection speed cap:
+    it splits ONE file into N parallel HTTP range requests. yt-dlp's
+    ``concurrent_fragment_downloads`` cannot do this because it only
+    applies to fragmented (dash/hls) transports — our progressive
+    ``bestvideo+bestaudio`` format has no fragments to parallelise.
+
+    Checks in order:
+    1. Bundled aria2c in any resource dir (bin/aria2c.exe)
+    2. aria2c on system PATH
+    3. None if not found — caller then falls back to yt-dlp's native
+       downloader, which still works, just single-connection.
+
+    Never verify by executing: the dev/CI box is Linux and a Windows
+    build would raise. Existence is the right check here.
+    """
+    exe_name = "aria2c.exe" if sys.platform.startswith("win") else "aria2c"
+    bundled = _find_bundled(f"bin/{exe_name}")
+    if bundled:
+        return str(bundled)
+
+    aria2_path = shutil.which("aria2c")
+    if aria2_path:
+        return aria2_path
+
+    return None
+
+
 def is_ytdlp_module_available() -> bool:
     """Check if yt-dlp Python module is available."""
     try:

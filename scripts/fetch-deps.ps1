@@ -82,6 +82,46 @@ if ((Test-Path -LiteralPath $DenoExe) -and (-not $Force)) {
 }
 
 # ---------------------------------------------------------------------------
+# aria2c (multi-connection downloader — the ONLY real cure for YouTube's
+# per-connection cap on non-fragmented/progressive formats)
+#
+# WHY THIS EXISTS (v2.0.82):
+#   yt-dlp's `concurrent_fragment_downloads` only applies to *fragmented*
+#   transports (dash/hls). Our format selector asks for
+#   `bestvideo+bestaudio`, which is a plain progressive MP4 — ONE connection.
+#   So that option was a no-op and YouTube's per-connection cap hit at full
+#   force. aria2c splits a single file into N parallel HTTP *range* requests
+#   (`-x`), which does defeat a per-connection cap.
+#
+#   The official win-64bit build1 zip is self-contained: its PE import table
+#   references only Windows system DLLs (kernel32, ws2_32, crypt32,
+#   secur32, iphlpapi, shell32, bcrypt, msvcrt, advapi32) — no
+#   VCRUNTIME140/MSVCP140 required, so it runs on a clean Windows box.
+#   Pinned because the "latest" tag is not immutable.
+$aria2Version = "1.37.0"
+$Aria2Exe = Join-Path $BinDir "aria2c.exe"
+if ((Test-Path -LiteralPath $Aria2Exe) -and (-not $Force)) {
+    Write-Host "[fetch-deps] aria2c already present, skipping."
+} else {
+    Write-Host "[fetch-deps] Downloading aria2c $aria2Version..."
+    $Aria2Url = "https://github.com/aria2/aria2/releases/download/release-$aria2Version/aria2-$aria2Version-win-64bit-build1.zip"
+    $Aria2Zip = Join-Path $TempDir "aria2.zip"
+    Invoke-WebRequest -Uri $Aria2Url -OutFile $Aria2Zip
+
+    Write-Host "[fetch-deps] Extracting aria2c..."
+    $Aria2Extract = Join-Path $TempDir "aria2-extract"
+    if (Test-Path -LiteralPath $Aria2Extract) { Remove-Item -Recurse -Force $Aria2Extract }
+    Expand-Archive -Path $Aria2Zip -DestinationPath $Aria2Extract -Force
+
+    $FoundAria2 = Get-ChildItem -Path $Aria2Extract -Recurse -Filter "aria2c.exe" | Select-Object -First 1
+    if (-not $FoundAria2) {
+        throw "aria2c.exe not found in extracted archive"
+    }
+    Copy-Item -LiteralPath $FoundAria2.FullName -Destination $Aria2Exe -Force
+    Write-Host "[fetch-deps] aria2c ready: $Aria2Exe"
+}
+
+# ---------------------------------------------------------------------------
 # Cleanup temp
 # ---------------------------------------------------------------------------
 if (Test-Path -LiteralPath $TempDir) {
