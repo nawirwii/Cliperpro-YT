@@ -208,7 +208,7 @@ def main():
         session.GROQ_UPLOAD_LIMIT, session.CHUNK_SECONDS = orig_limit, orig_chunk
         posts = [h for h in MockHandler.hits if h.endswith("/audio/transcriptions")]
         check("S5 chunked into 3 uploads", len(posts) == 3, f"hits={MockHandler.hits}")
-        check("S5 log mentions chunking", "exceeds upload cap" in str(logs), str(logs))
+        check("S5 log mentions chunking", "memecah menjadi" in str(logs), str(logs))
         segs = parse_srt_segments(str(srt5))
         check("S5 merged 9 segments", len(segs) == 9, f"n={len(segs)}")
         check("S5 chunk2 offset +3s", abs(segs[3]["start"] - 3.0) < 0.35, f"start={segs[3]['start']}")

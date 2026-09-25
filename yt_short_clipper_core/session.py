@@ -1,9 +1,11 @@
 """Session orchestration for the find-highlights phase."""
 
 import json
+import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -18,10 +20,18 @@ LogFn = Callable[[str], None]
 
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
-# Groq/OpenAI Whisper upload cap is ~25 MB per request. We keep a margin so
-# a long local video never trips it: mono MP3 @64kbps ≈ 4.8 MB per 10 min.
+# Whisper upload constraints (both matter — see v2.0.79):
+#   1. size  — Groq/OpenAI reject files above ~25 MB per request.
+#   2. time  — the provider edge (Cloudflare-style) drops the connection when a
+#      single request runs too long. A 43-min file compressed to 19.6 MB
+#      (well under the size cap) stayed connected for 97 s and was then reset.
+#      So we split by DURATION, not only by size: 5-min pieces keep every
+#      request far below any timeout, for any model (turbo or large-v3).
 GROQ_UPLOAD_LIMIT = 22 * 1024 * 1024
-CHUNK_SECONDS = 600  # 10-min chunks for audio longer than the upload cap
+MAX_UPLOAD_SECONDS = 300  # transcribe longer audio as <=5-min requests
+CHUNK_SECONDS = 300
+MIN_SPLIT_SECONDS = 45  # below this a failing piece is not worth splitting
+MAX_SPLIT_DEPTH = 3  # 300 -> 150 -> 75 -> 45 s worst case
 
 
 def find_highlights_only(
@@ -259,6 +269,30 @@ def _write_srt(path: Path, segments: list[dict[str, Any]]) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _probe_duration(ffmpeg_path: str, path: Path) -> float:
+    """Duration in seconds via ffmpeg (works for audio and video, no ffprobe)."""
+    probe = subprocess.run(
+        [ffmpeg_path, "-hide_banner", "-i", str(path)],
+        capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS,
+    )
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", probe.stderr or "")
+    if not m:
+        return 0.0
+    h, mi, s = m.groups()
+    return int(h) * 3600 + int(mi) * 60 + float(s)
+
+
+def _split_audio(
+    ffmpeg_path: str, src: Path, dst: Path, start: float, duration: float
+) -> None:
+    """Cut [start, start+duration) out of an audio file into ``dst`` (MP3)."""
+    _run_ffmpeg([
+        ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+        "-ss", f"{start:.3f}", "-i", str(src), "-t", f"{duration:.3f}",
+        "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "64k", str(dst),
+    ])
+
+
 def _transcribe_upload(client: Any, model: str, audio_path: Path) -> str:
     """POST one audio file to /audio/transcriptions; returns SRT text."""
     with open(audio_path, "rb") as f:
@@ -273,6 +307,70 @@ def _transcribe_upload(client: Any, model: str, audio_path: Path) -> str:
     return text
 
 
+def _transcribe_piece(
+    client: Any,
+    model: str,
+    ffmpeg_path: str,
+    audio_path: Path,
+    log: LogFn,
+    label: str,
+    depth: int = 0,
+) -> list[dict[str, Any]]:
+    """Upload one audio piece, retrying and then halving it on dropped connections.
+
+    Providers behind a CDN (Cloudflare and friends) close idle/over-long
+    requests without a response, which surfaces as
+    ``APIConnectionError: Server disconnected without sending a response``.
+    Retrying the same file can hit the same wall, so after a few tries we cut
+    the piece in half and transcribe each half — smaller payload and shorter
+    server-side processing time. Returns segments relative to ``audio_path``.
+    """
+    from openai import APIConnectionError
+
+    last_error: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            srt_text = _transcribe_upload(client, model, audio_path)
+            srt_file = audio_path.with_suffix(".srt")
+            srt_file.write_text(srt_text, encoding="utf-8")
+            return parse_srt_segments(str(srt_file))
+        except APIConnectionError as exc:
+            last_error = exc
+            if attempt < 2:
+                wait = 4 * attempt
+                log(f"  ⚠️ {label}: koneksi terputus, ulang dalam {wait} detik "
+                    f"(percobaan {attempt}/2)...")
+                time.sleep(wait)
+
+    duration = _probe_duration(ffmpeg_path, audio_path)
+    if depth < MAX_SPLIT_DEPTH and duration >= MIN_SPLIT_SECONDS * 2:
+        half = duration / 2
+        log(f"  ⚠️ {label}: masih terputus — membagi menjadi 2 bagian "
+            f"({half:.0f} detik) lalu mencoba lagi...")
+        segments: list[dict[str, Any]] = []
+        for i, start in enumerate((0.0, half)):
+            part = audio_path.with_name(f"{audio_path.stem}_p{i}.mp3")
+            _split_audio(ffmpeg_path, audio_path, part, start, half)
+            segments.extend(
+                _transcribe_piece(
+                    client, model, ffmpeg_path, part, log,
+                    f"{label} bagian {i + 1}/2", depth + 1,
+                )
+            )
+        return segments
+
+    raise last_error if last_error else RuntimeError(
+        f"Transcription of {label} failed with no response from the provider."
+    )
+
+
+def _chunk_label() -> str:
+    """Human label for the piece length ("5 menit" / "45 detik")."""
+    if CHUNK_SECONDS % 60 == 0:
+        return f"{CHUNK_SECONDS // 60} menit"
+    return f"{CHUNK_SECONDS} detik"
+
+
 def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: LogFn) -> None:
     """Transcribe local audio via an OpenAI-compatible Whisper endpoint.
 
@@ -285,9 +383,12 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
 
     The extracted WAV is re-encoded to a small mono MP3 before upload so a
     long video (43 min of WAV ≈ 82 MB) stays under the provider's ~25 MB
-    cap — otherwise the server drops the connection mid-upload. Audio that
-    is still too big is split into 10-minute chunks, transcribed
-    separately, and merged back into a single SRT with shifted offsets.
+    size cap. Audio longer than ``MAX_UPLOAD_SECONDS`` is additionally split
+    into short pieces, because a large-but-under-cap file still fails when the
+    provider's edge times out while transcribing (observed: 19.6 MB held for
+    97 s, then "Server disconnected"). Each piece is retried and, if it keeps
+    dropping, halved recursively. Pieces are merged back into one SRT with
+    shifted offsets.
     """
     from openai import OpenAI
 
@@ -313,7 +414,11 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
             "transcription API key in Settings → AI Model."
         )
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    # Our own retry/halve logic gives better feedback than the SDK's silent
+    # retries, so keep those off and let _transcribe_piece decide what to do.
+    client = OpenAI(
+        api_key=api_key, base_url=base_url, max_retries=0, timeout=300.0
+    )
 
     try:
         # 1) Compress: mono 64k MP3 (43-min WAV = 82 MB → ~21 MB).
@@ -326,16 +431,24 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
         ])
 
         size = mp3_path.stat().st_size
-        if size <= GROQ_UPLOAD_LIMIT:
-            log(f"Transcribing audio with {model} via {base_url} ({size / 1024 / 1024:.1f} MB)...")
-            srt_text = _transcribe_upload(client, model, mp3_path)
-            srt_path.write_text(srt_text, encoding="utf-8")
+        duration = _probe_duration(get_ffmpeg_path(), mp3_path)
+        too_big = size > GROQ_UPLOAD_LIMIT
+        too_long = duration > MAX_UPLOAD_SECONDS
+        if not too_big and not too_long:
+            log(f"Transcribing audio with {model} via {base_url} "
+                f"({size / 1024 / 1024:.1f} MB, {duration:.0f}s)...")
+            srt_path.write_text(_transcribe_upload(client, model, mp3_path), encoding="utf-8")
             log(f"Transcription saved: {srt_path}")
             return
 
-        # 2) Long audio → split into fixed 10-min chunks and merge with offset.
-        log(f"Audio {size / 1024 / 1024:.1f} MB exceeds upload cap — splitting into "
-            f"{CHUNK_SECONDS // 60}-minute chunks...")
+        # 2) Long and/or large → fixed-length pieces, merged with offset.
+        reason = []
+        if too_long:
+            reason.append(f"durasi {duration / 60:.1f} menit")
+        if too_big:
+            reason.append(f"ukuran {size / 1024 / 1024:.1f} MB")
+        log(f"Audio {' dan '.join(reason)} melebihi batas upload — memecah menjadi "
+            f"bagian {_chunk_label()} agar tidak timeout...")
         chunk_dir = wav_path.parent / "chunks"
         if chunk_dir.exists():
             shutil.rmtree(chunk_dir)  # stale chunks from a previous run
@@ -354,9 +467,10 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
         for i, chunk in enumerate(chunks):
             offset = i * CHUNK_SECONDS
             log(f"Transcribing chunk {i + 1}/{len(chunks)} ({chunk.name})...")
-            chunk_srt = chunk.with_suffix(".srt")
-            chunk_srt.write_text(_transcribe_upload(client, model, chunk), encoding="utf-8")
-            for seg in parse_srt_segments(str(chunk_srt)):
+            for seg in _transcribe_piece(
+                client, model, get_ffmpeg_path(), chunk, log,
+                f"chunk {i + 1}/{len(chunks)}",
+            ):
                 segments.append({
                     "start": float(seg["start"]) + offset,
                     "end": float(seg["end"]) + offset,
@@ -377,10 +491,13 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
         detail = str(getattr(exc, "body", "") or exc).strip()
         if isinstance(exc, APIConnectionError):
             raise RuntimeError(
-                "Transcription connection error — koneksi terputus saat upload "
-                "(audio terlalu besar atau jaringan tidak stabil). App sudah "
-                "mengompres & memotong audio otomatis; cek koneksi internet ke "
-                f"{base_url} lalu coba lagi. Details: {str(exc)[:200]}"
+                "Transcription timeout — provider memutus koneksi saat memproses "
+                "audio. App sudah mengompres (MP3 64k mono) dan memecah audio jadi "
+                f"bagian {_chunk_label()}, lalu mencoba membagi lagi "
+                "otomatis. Usually 1 dari 2 penyebab: (1) model terlalu berat untuk "
+                "durasi video — coba model 'whisper-large-v3-turbo' (lebih cepat, "
+                "hampir sama akuratnya), atau (2) koneksi ke provider tidak stabil "
+                f"— cek {base_url} lalu coba lagi. Details: {str(exc)[:200]}"
             ) from exc
         if isinstance(exc, AuthenticationError):
             raise RuntimeError(
