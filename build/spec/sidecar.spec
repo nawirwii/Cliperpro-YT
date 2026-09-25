@@ -36,16 +36,44 @@ curl_cffi_submodules = collect_submodules('curl_cffi')
 pillow_data = collect_data_files('PIL', include_py_files=False)
 pillow_submodules = collect_submodules('PIL')
 
+# v2.0.88: faster-whisper (optional local transcription engine).
+# Its native libraries MUST be collected as binaries or the frozen sidecar
+# raises "DLL load failed" on first use. Measured on-disk cost:
+#   ctranslate2 60 MB, av 32 MB, tokenizers 12 MB, huggingface_hub 8 MB.
+# onnxruntime (67 MB) is deliberately NOT collected — faster-whisper imports
+# it lazily inside vad.py and we always run with vad_filter=False.
+fw_imported = True
+try:
+    import faster_whisper  # noqa: F401
+    print("[sidecar.spec] faster-whisper pre-imported successfully")
+except ImportError as e:
+    fw_imported = False
+    print(f"[sidecar.spec] WARNING: faster-whisper not installed: {e}")
+
+fw_binaries = []
+fw_data = []
+fw_submodules = []
+if fw_imported:
+    for pkg in ('ctranslate2', 'tokenizers', 'av', 'huggingface_hub'):
+        try:
+            fw_binaries += collect_dynamic_libs(pkg)
+            fw_data += collect_data_files(pkg, include_py_files=False)
+            fw_submodules += collect_submodules(pkg)
+        except Exception as e:
+            print(f"[sidecar.spec] WARNING: could not collect {pkg}: {e}")
+
 a = Analysis(
     ['../../scripts/sidecar_entry.py'],
     pathex=['../..'],
     binaries=[
         *curl_cffi_binaries,
+        *fw_binaries,
     ],
     datas=[
         *mediapipe_data,
         *opencv_data,
         *pillow_data,
+        *fw_data,
     ],
     hiddenimports=[
         'openai',
@@ -78,6 +106,18 @@ a = Analysis(
         *numpy_submodules,
         *ytdlp_submodules,
         *pillow_submodules,
+        # faster-whisper local transcription (v2.0.88)
+        'faster_whisper',
+        'faster_whisper.audio',
+        'faster_whisper.feature_extractor',
+        'faster_whisper.tokenizer',
+        'faster_whisper.transcribe',
+        'faster_whisper.utils',
+        'faster_whisper.vad',
+        'ctranslate2',
+        'tokenizers',
+        'huggingface_hub',
+        *fw_submodules,
     ],
     hookspath=['../../build/spec'],
     hooksconfig={},

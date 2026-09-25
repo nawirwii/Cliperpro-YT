@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import {
   AI_PROVIDER_PRESETS,
   FALLBACK_MODELS,
+  LOCAL_WHISPER_MODELS,
   presetForBaseUrl,
   signupLabel,
   TRANSCRIPTION_PRESETS,
@@ -91,8 +92,11 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
     setTranscriptionPresetKey(key);
     const preset = TRANSCRIPTION_PRESETS.find((p) => p.key === key);
     if (!preset) return;
-    // Prefill the fields, but keep the API key the user already typed — it is
-    // provider-specific and we must never silently discard a credential.
+    // Prefill the fields, but NEVER touch the API key. It is provider-specific
+    // and a typed credential is the user's property: silently discarding it
+    // means re-pasting every time they toggle between local and cloud. The key
+    // is simply ignored while local is selected (the field is hidden and the
+    // sidecar never reads it on the local path), so keeping it is safe.
     setTranscriptionUrl(preset.baseUrl);
     setTranscriptionModel(preset.model);
   };
@@ -336,6 +340,11 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
                 {transcriptionPreset.apiKeyFormat}
               </code>
             </p>
+            {transcriptionPreset.localNote ? (
+              <p className="text-xs text-amber-500/90 border-l-2 border-amber-500/50 pl-2">
+                {transcriptionPreset.localNote}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -346,6 +355,8 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
               value={transcriptionUrl}
               onChange={(e) => setTranscriptionUrl(e.target.value)}
               placeholder={transcriptionPreset.baseUrl}
+              readOnly={transcriptionPreset.local}
+              className={transcriptionPreset.local ? "opacity-60" : undefined}
             />
           </div>
 
@@ -353,32 +364,57 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
             <label className="text-sm font-medium text-[var(--color-text-secondary)]">
               Transcription Model
             </label>
-            <Input
-              value={transcriptionModel}
-              onChange={(e) => setTranscriptionModel(e.target.value)}
-              placeholder={transcriptionPreset.model}
-            />
+            {transcriptionPreset.models ? (
+              <select
+                value={transcriptionModel || transcriptionPreset.model}
+                onChange={(e) => setTranscriptionModel(e.target.value)}
+                className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+              >
+                {transcriptionPreset.models.map((id) => {
+                  const info = LOCAL_WHISPER_MODELS.find((m) => m.id === id);
+                  return (
+                    <option key={id} value={id}>
+                      {id} · {(info?.sizeMB ?? 0).toLocaleString("id-ID")} MB —{" "}
+                      {info?.note}
+                    </option>
+                  );
+                })}
+              </select>
+            ) : (
+              <Input
+                value={transcriptionModel}
+                onChange={(e) => setTranscriptionModel(e.target.value)}
+                placeholder={transcriptionPreset.model}
+              />
+            )}
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-[var(--color-text-secondary)]">
-              Transcription API Key
-            </label>
-            <Input
-              type="password"
-              value={transcriptionKey}
-              onChange={(e) => setTranscriptionKey(e.target.value)}
-              placeholder="Kosongkan untuk memakai API key provider utama"
-            />
-            <a
-              href={transcriptionPreset.signupUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-block text-xs underline text-[var(--color-accent)]"
-            >
-              Ambil API key di {signupLabel(transcriptionPreset.signupUrl)} →
-            </a>
-          </div>
+          {transcriptionPreset.local ? (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Tidak perlu API key — mesinnya jalan di dalam aplikasi ini. Kosongkan
+              semua field di atas Except model.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+                Transcription API Key
+              </label>
+              <Input
+                type="password"
+                value={transcriptionKey}
+                onChange={(e) => setTranscriptionKey(e.target.value)}
+                placeholder="Kosongkan untuk memakai API key provider utama"
+              />
+              <a
+                href={transcriptionPreset.signupUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block text-xs underline text-[var(--color-accent)]"
+              >
+                Ambil API key di {signupLabel(transcriptionPreset.signupUrl)} →
+              </a>
+            </div>
+          )}
         </CardContent>
       </Card>
 

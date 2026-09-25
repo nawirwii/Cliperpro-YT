@@ -24,5 +24,12 @@ matplotlib>=3.8.0
 # HTTP requests (Whisper API, Repliz API)
 requests>=2.31.0
 
+# Optional LOCAL transcription engine (v2.0.88). Runs in-process, so the app
+# can transcribe a long local video with no API key, no upload cap and no
+# per-request cost. Weights are downloaded on first use, not bundled.
+# `onnxruntime` is intentionally NOT required: it is only needed for the VAD
+# filter, which we disable, and it would add ~67 MB to the frozen sidecar.
+faster-whisper>=1.1.0
+
 # Build tool for freezing the sidecar
 pyinstaller>=6.0.0

@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from .constants import resolve_output_language
 from .helpers import debug_log, get_ffmpeg_path
 from .highlight_finder import find_highlights, parse_requested_ranges
+from . import local_whisper
 from .srt_parser import extract_transcript_for_highlight, parse_srt, parse_srt_segments
 from .subtitle_downloader import download_caption_words, download_subtitle_only
 
@@ -542,6 +543,34 @@ def _chunk_label(seconds: int | None = None) -> str:
     return f"{total} detik"
 
 
+def _transcribe_audio_local(ai: dict[str, Any], wav_path: Path, srt_path: Path,
+                            log: LogFn, model: str) -> None:
+    """Transcribe a local audio file in-process with faster-whisper.
+
+    No API key, no upload, no size cap and no chunking. The engine decodes the
+    WAV directly, so a 43-minute file is one pass — and because faster-whisper
+    returns real per-segment timestamps, the SRT is more accurate than the
+    cloud path, which only returns one blob of text we have to re-slice.
+    """
+    log("Transcribing locally with faster-whisper (no API, no upload)...")
+    segments = local_whisper.transcribe(
+        wav_path,
+        model=model,
+        language=ai.get("transcription_language") or "id",
+        device=ai.get("transcription_device") or None,
+        compute_type=ai.get("transcription_compute_type") or None,
+        log=log,
+    )
+    if not segments:
+        raise RuntimeError(
+            "Transkripsi lokal selesai tapi tidak menghasilkan segmen teks. "
+            "Coba model yang lebih besar (mis. 'small' atau 'turbo'), atau "
+            "periksa audio sumbernya."
+        )
+    _write_srt(srt_path, segments)
+    log(f"Transcription saved: {srt_path}")
+
+
 def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: LogFn) -> None:
     """Transcribe local audio via an OpenAI-compatible Whisper endpoint.
 
@@ -578,6 +607,14 @@ def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: L
         or ai.get("model")
         or "whisper-1"
     )
+
+    # v2.0.88: local faster-whisper. Branch BEFORE the API-key check and
+    # before any upload work: a local run needs no key, no compression, no
+    # chunking, and no network at all after the first model download. None of
+    # the ~25 MB / disconnect / retired-host failure modes apply to it.
+    if local_whisper.is_local_base_url(base_url):
+        _transcribe_audio_local(ai, wav_path, srt_path, log, model)
+        return
 
     if not api_key:
         raise RuntimeError(

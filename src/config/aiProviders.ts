@@ -94,7 +94,23 @@ export interface TranscriptionPreset {
   signupUrl: string;
   /** Token prefix, so the user knows they pasted the right credential. */
   apiKeyFormat: string;
+  /** True for the in-process engine: no network, no key, no upload cap. */
+  local?: boolean;
+  /** Model choices offered as a dropdown instead of a free-text field. */
+  models?: string[];
+  /** Shown under the picker so the speed/quality trade-off is explicit. */
+  localNote?: string;
 }
+
+/** faster-whisper model ids, smallest first. Sizes are on-disk download sizes. */
+export const LOCAL_WHISPER_MODELS = [
+  { id: "tiny", sizeMB: 75, note: "paling cepat, akurasi paling rendah" },
+  { id: "base", sizeMB: 145, note: "cepat, cukup untuk draf" },
+  { id: "small", sizeMB: 465, note: "seimbang — rekomendasi untuk CPU lama" },
+  { id: "medium", sizeMB: 1500, note: "akurat, lambat di CPU" },
+  { id: "large-v3", sizeMB: 3100, note: "paling akurat, paling lambat & besar" },
+  { id: "turbo", sizeMB: 1600, note: "akurasi large-v3, ~4x lebih cepat dari large-v3" },
+];
 
 /**
  * Presets for the "Transcription (local videos)" card.
@@ -109,6 +125,20 @@ export interface TranscriptionPreset {
  * confirmed via the public model API as `automatic-speech-recognition`.
  */
 export const TRANSCRIPTION_PRESETS: TranscriptionPreset[] = [
+  {
+    key: "local",
+    name: "🏠 Lokal (faster-whisper) — gratis, tanpa API",
+    baseUrl: "local://faster-whisper",
+    model: "small",
+    description:
+      "Jalan di komputer sendiri. Tidak ada biaya API, tidak ada batas ukuran upload, dan tidak ada data yang keluar dari PC",
+    signupUrl: "https://github.com/SYSTRAN/faster-whisper",
+    apiKeyFormat: "tidak perlu API key",
+    local: true,
+    models: LOCAL_WHISPER_MODELS.map((m) => m.id),
+    localNote:
+      "Model diunduh sekali saat pertama dipakai (butuh internet), lalu tersimpan dan bisa dipakai offline. CATATAN: di CPU lama, transkripsi bisa lebih LAMBAT dari durasi video — video 10 menit bisa butuh 20–40 menit. Untuk CPU lemah pilih 'small' atau 'base', bukan 'turbo'.",
+  },
   {
     key: "huggingface",
     name: "🤗 Hugging Face",
@@ -154,6 +184,9 @@ export function transcriptionPresetFor(
 ): TranscriptionPreset {
   const hit = TRANSCRIPTION_PRESETS.find((p) => {
     if (p.key === "custom" || !baseUrl) return false;
+    // The local engine is identified by its sentinel, not by host matching —
+    // it has no host, and `new URL("local://...").host` is meaningless.
+    if (p.local) return baseUrl.trim().toLowerCase().startsWith(p.baseUrl);
     try {
       return (
         baseUrl.includes(new URL(p.baseUrl).host) &&
