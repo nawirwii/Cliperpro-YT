@@ -215,6 +215,9 @@ export function CreatePage() {
           base_url: hf.baseUrl,
           model: hf.model,
           system_message: hf.systemMessage,
+          transcription_base_url: hf.transcriptionBaseUrl?.trim() || undefined,
+          transcription_model: hf.transcriptionModel?.trim() || undefined,
+          transcription_api_key: hf.transcriptionApiKey?.trim() || undefined,
         },
       });
       navigate("/processing");

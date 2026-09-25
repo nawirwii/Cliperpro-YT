@@ -5,6 +5,15 @@ export interface AIProviderSettings {
   apiKey: string;
   model: string;
   systemMessage?: string;
+  /**
+   * Optional separate Whisper endpoint used ONLY for transcribing LOCAL
+   * video files. When empty, local transcription falls back to the same
+   * baseUrl/apiKey/model as chat — which only works if that endpoint
+   * implements /audio/transcriptions (OpenAI, Groq, whisper servers).
+   */
+  transcriptionBaseUrl?: string;
+  transcriptionModel?: string;
+  transcriptionApiKey?: string;
 }
 
 export interface WatermarkSettings {
@@ -67,6 +76,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     apiKey: "",
     model: "",
     systemMessage: "",
+    transcriptionBaseUrl: "",
+    transcriptionModel: "",
+    transcriptionApiKey: "",
   },
   gpuAcceleration: {
     enabled: false,

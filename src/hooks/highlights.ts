@@ -49,6 +49,10 @@ export interface AIRequestSettings {
   model: string;
   system_message?: string;
   temperature?: number;
+  /** Optional separate Whisper endpoint for transcribing LOCAL videos. */
+  transcription_base_url?: string;
+  transcription_model?: string;
+  transcription_api_key?: string;
 }
 
 export type FindHighlightsEvent = { type: "log"; message: string };

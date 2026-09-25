@@ -1,7 +1,7 @@
 {
   "identifier": "com.jipraks.ytshortclipper-v2",
 
-  "version": "2.0.76",
+  "version": "2.0.77",
 
   "build": {
     "frontendDist": "../dist",

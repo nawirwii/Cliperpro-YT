@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, KeyRound, Loader2, Save, Sparkles } from "lucide-react";
+import { AudioLines, ExternalLink, KeyRound, Loader2, Save, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,6 +54,9 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
   const [apiKey, setApiKey] = useState(settings.apiKey || "");
   const [model, setModel] = useState(settings.model || "");
   const [systemMessage, setSystemMessage] = useState(settings.systemMessage || "");
+  const [transcriptionUrl, setTranscriptionUrl] = useState(settings.transcriptionBaseUrl || "");
+  const [transcriptionModel, setTranscriptionModel] = useState(settings.transcriptionModel || "");
+  const [transcriptionKey, setTranscriptionKey] = useState(settings.transcriptionApiKey || "");
   const [models, setModels] = useState<string[]>(() =>
     settings.model && !FALLBACK_MODELS.includes(settings.model)
       ? [settings.model, ...FALLBACK_MODELS]
@@ -113,7 +116,15 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
 
     setSaving(true);
     try {
-      await onSave({ baseUrl, apiKey, model, systemMessage });
+      await onSave({
+      baseUrl,
+      apiKey,
+      model,
+      systemMessage,
+      transcriptionBaseUrl: transcriptionUrl,
+      transcriptionModel: transcriptionModel,
+      transcriptionApiKey: transcriptionKey,
+    });
     } finally {
       setSaving(false);
     }
@@ -262,6 +273,61 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
               {"{transcript}"}, {"{user_direction}"}. Leave {"{user_direction}"} out and
               any direction typed on the Create page is appended at the end instead.
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AudioLines className="w-5 h-5 text-[var(--color-accent)]" />
+            Transcription (local videos)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Optional — used ONLY when transcribing an uploaded local video file
+            (&quot;File Lokal&quot; source). Your main AI provider may not expose a
+            Whisper endpoint. Examples:{" "}
+            <code className="px-1 rounded bg-[var(--color-bg-secondary)]">https://api.openai.com/v1</code>{" "}
+            + <code className="px-1 rounded bg-[var(--color-bg-secondary)]">whisper-1</code>, or{" "}
+            <code className="px-1 rounded bg-[var(--color-bg-secondary)]">https://api.groq.com/openai/v1</code>{" "}
+            + <code className="px-1 rounded bg-[var(--color-bg-secondary)]">whisper-large-v3-turbo</code>.
+            Leave empty to reuse the main provider above.
+          </p>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+              Transcription Base URL
+            </label>
+            <Input
+              value={transcriptionUrl}
+              onChange={(e) => setTranscriptionUrl(e.target.value)}
+              placeholder="https://.../v1 (leave empty to reuse main provider)"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+              Transcription Model
+            </label>
+            <Input
+              value={transcriptionModel}
+              onChange={(e) => setTranscriptionModel(e.target.value)}
+              placeholder="whisper-1 (leave empty to reuse main model)"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+              Transcription API Key
+            </label>
+            <Input
+              type="password"
+              value={transcriptionKey}
+              onChange={(e) => setTranscriptionKey(e.target.value)}
+              placeholder="Leave empty to reuse main API key"
+            />
           </div>
         </CardContent>
       </Card>

@@ -230,23 +230,59 @@ def _extract_audio(ffmpeg_path: str, video_path: Path, wav_path: Path, log: LogF
 def _transcribe_audio(ai: dict[str, Any], wav_path: Path, srt_path: Path, log: LogFn) -> None:
     """Transcribe local audio via an OpenAI-compatible Whisper endpoint.
 
-    Uses the SAME provider configured for highlight detection (base_url +
-    api_key + model). The model must support ``/audio/transcriptions``
+    Uses the transcription-specific provider when configured
+    (``transcription_base_url`` / ``transcription_model`` /
+    ``transcription_api_key``); otherwise it falls back to the SAME
+    provider used for highlight detection (base_url + api_key + model).
+    The endpoint must support ``/audio/transcriptions``
     (e.g. whisper-1 / groq whisper / a local whisper gateway).
     """
     from openai import OpenAI
 
-    base_url = ai.get("base_url") or "https://api.openai.com/v1"
-    model = ai.get("model") or "whisper-1"
+    base_url = (
+        (ai.get("transcription_base_url") or "").strip()
+        or ai.get("base_url")
+        or "https://api.openai.com/v1"
+    )
+    api_key = (
+        (ai.get("transcription_api_key") or "").strip()
+        or ai.get("api_key")
+        or ""
+    )
+    model = (
+        (ai.get("transcription_model") or "").strip()
+        or ai.get("model")
+        or "whisper-1"
+    )
     log(f"Transcribing audio with {model} via {base_url}...")
-    client = OpenAI(api_key=ai["api_key"], base_url=base_url)
 
-    with open(wav_path, "rb") as f:
-        result = client.audio.transcriptions.create(
-            model=model,
-            file=("audio.wav", f, "audio/wav"),
-            response_format="srt",
+    if not api_key:
+        raise RuntimeError(
+            "Transcription API key is missing. Set the main AI API key or the "
+            "transcription API key in Settings → AI Model."
         )
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+
+    try:
+        with open(wav_path, "rb") as f:
+            result = client.audio.transcriptions.create(
+                model=model,
+                file=("audio.wav", f, "audio/wav"),
+                response_format="srt",
+            )
+    except Exception as exc:
+        # The chat-completions endpoint (e.g. a local Hermes gateway) does
+        # NOT implement /audio/transcriptions — give an actionable hint
+        # instead of a raw 400 body.
+        detail = str(getattr(exc, "body", "") or exc).strip()
+        raise RuntimeError(
+            "Transcription failed — this AI endpoint does not support "
+            "audio transcription. In Settings → AI Model, fill in "
+            "'Transcription Base URL' (e.g. https://api.openai.com/v1 with "
+            "model whisper-1, or https://api.groq.com/openai/v1 with "
+            f"whisper-large-v3-turbo). Details: {detail[:300]}"
+        ) from exc
 
     text = result if isinstance(result, str) else getattr(result, "text", "")
     if not text or not text.strip():
