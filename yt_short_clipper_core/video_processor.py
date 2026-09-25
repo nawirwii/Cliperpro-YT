@@ -808,10 +808,28 @@ def _download_section_module(
     _watchdog.start()
 
     def _run_download(ydl_opts_local: dict, label: str) -> None:
-        """Run yt-dlp download in a thread, aborting if watchdog fires."""
+        """Run yt-dlp download in a thread, aborting if watchdog fires.
+
+        v2.0.83: capture the worker thread's exception and re-raise it.
+        Previously the download ran as a bare ``lambda`` target, so any
+        ``DownloadError`` was swallowed by the threading machinery (printed
+        to stderr as "Exception in thread ..." and the thread simply died).
+        ``is_alive()`` then went False and this function returned as if the
+        download had succeeded — the caller only found out later via a
+        confusing "Downloaded section file not found". A real extraction
+        failure ("The page needs to be reloaded" from stale cookies) was
+        therefore reported to the user as a missing-file problem.
+        """
+        holder: dict[str, BaseException] = {}
+
+        def _target() -> None:
+            try:
+                yt_dlp.YoutubeDL(ydl_opts_local).download([url])
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                holder["exc"] = exc
+
         dl_thread = threading.Thread(
-            target=lambda: yt_dlp.YoutubeDL(ydl_opts_local).download([url]),
-            daemon=True, name=f"yt-dlp-dl-{label}",
+            target=_target, daemon=True, name=f"yt-dlp-dl-{label}",
         )
         dl_thread.start()
         while dl_thread.is_alive():
@@ -831,6 +849,9 @@ def _download_section_module(
                     f"{_EXTRACT_ABORT}s with no activity. Check your network or try again."
                 )
             dl_thread.join(timeout=5)
+        # Surface the real failure instead of a downstream "file not found".
+        if "exc" in holder:
+            raise holder["exc"]
 
     def _cut_section(full_path: str) -> str:
         """Cut a full downloaded video to [start_time, end_time].
@@ -924,6 +945,28 @@ def _download_section_module(
             raise RuntimeError(
                 "YouTube rejected access (HTTP 403). Your cookies may have expired. "
                 "Please export fresh cookies while logged into YouTube."
+            )
+        # v2.0.83: recognise the stale-cookie / bot-check signature. YouTube
+        # answers a rejected cookie jar with these two phrasings, and because
+        # yt-dlp *skips every client that does not support cookies* when a
+        # cookiefile is set, the whole ladder collapses onto the same failure.
+        # The user needs "refresh your cookies", not a format error.
+        lowered = msg.lower()
+        if "page needs to be reloaded" in lowered or "video unavailable" in lowered:
+            cookie_hint = ""
+            try:
+                ck = _get_cookies_path()
+                cookie_hint = f" Cookie yang dipakai: {ck}."
+            except Exception:
+                cookie_hint = ""
+            raise RuntimeError(
+                "YouTube menolak sesi login (bukan masalah jaringan). Gejala "
+                "'The page needs to be reloaded' / 'Video unavailable' hampir "
+                "selalu berarti cookies.txt basi atau YouTube sedang "
+                "meminta verifikasi bot." + cookie_hint +
+                " Export ulang cookies.txt dari browser yang sudah login "
+                "(ekstensi 'Get cookies.txt LOCALLY'), lalu ganti file lama "
+                "di folder aplikasi."
             )
 
         log("Retrying with fallback options (simple format + no ranges)...")
