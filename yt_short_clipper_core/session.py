@@ -115,7 +115,7 @@ def find_highlights_only(
         "subtitle_language": subtitle_language,
         "user_direction": (user_direction or "").strip() or None,
         "output_language": (output_language or "auto").strip().lower(),
-        "output_language_name": resolved_language,
+        "output_language_name": resolve_output_language(output_language, subtitle_language),
         "caption_words_path": caption_words_path,
         "caption_available": bool(caption_words_path),
         "highlights": highlights,
