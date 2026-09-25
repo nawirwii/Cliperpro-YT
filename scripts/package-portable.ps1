@@ -43,6 +43,7 @@ $SidecarName = "ytclip-sidecar-x86_64-pc-windows-msvc.exe"
 $Sidecar     = Join-Path $Bin "ytclip-sidecar-x86_64-pc-windows-msvc.exe"
 $Ffmpeg      = Join-Path $Bin "ffmpeg\ffmpeg.exe"
 $Deno        = Join-Path $Bin "bin\deno.exe"
+$Aria2c      = Join-Path $Bin "bin\aria2c.exe"
 $Model       = Join-Path $Bin "models\face_landmarker.task"
 $FontsDir    = Join-Path $Root "src-tauri\fonts"
 
@@ -52,6 +53,7 @@ $required = [ordered]@{
     "sidecar   (npm run build:sidecar)"               = $Sidecar
     "ffmpeg    (npm run deps)"                         = $Ffmpeg
     "deno      (npm run deps)"                         = $Deno
+    "aria2c    (npm run deps)"                         = $Aria2c
     "model     (face_landmarker.task)"                = $Model
     "fonts     (src-tauri\fonts\*.ttf)"               = (Get-ChildItem -Path $FontsDir -Filter *.ttf -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
 }
@@ -87,6 +89,7 @@ Copy-Item -LiteralPath $AppExe   -Destination (Join-Path $Stage "yt-short-clippe
 Copy-Item -LiteralPath $Sidecar  -Destination (Join-Path $Stage $SidecarName) -Force
 Copy-Item -LiteralPath $Ffmpeg   -Destination (Join-Path $Stage "ffmpeg\ffmpeg.exe") -Force
 Copy-Item -LiteralPath $Deno     -Destination (Join-Path $Stage "bin\deno.exe") -Force
+Copy-Item -LiteralPath $Aria2c   -Destination (Join-Path $Stage "bin\aria2c.exe") -Force
 Copy-Item -LiteralPath $Model    -Destination (Join-Path $Stage "models\face_landmarker.task") -Force
 Copy-Item -Path (Join-Path $FontsDir "*") -Destination (Join-Path $Stage "fonts\") -Force
 Copy-Item -LiteralPath $WebView2 -Destination (Join-Path $Stage "MicrosoftEdgeWebview2Setup.exe") -Force
@@ -186,9 +189,13 @@ Write-Host "[package] Compressing FULL zip..."
 Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $FullZip -CompressionLevel Optimal
 
 # --- Update zip: artifacts that change between releases + fonts (needed for Hook Style dropdown) ---
+# bin\aria2c.exe is included on purpose: it is a NEW runtime dependency, so
+# without it existing users updating in place would silently keep the
+# single-connection downloader and the YouTube throttle would return.
 $UpdateItems = @(
     (Join-Path $Stage "yt-short-clipper-v2.exe"),
     (Join-Path $Stage $SidecarName),
+    (Join-Path $Stage "bin"),
     (Join-Path $Stage "fonts"),
     (Join-Path $Stage "run.bat"),
     (Join-Path $Stage "PANDUAN.txt")
@@ -196,6 +203,35 @@ $UpdateItems = @(
 if (Test-Path -LiteralPath $UpdateZip) { Remove-Item -Force $UpdateZip }
 Write-Host "[package] Compressing UPDATE zip..."
 Compress-Archive -Path $UpdateItems -DestinationPath $UpdateZip -CompressionLevel Optimal
+
+# --- Verify the zips really contain the binaries the app looks for ---
+# v2.0.84: this check exists because aria2c was added to fetch-deps.ps1 and
+# tauri.conf.json but NOT to this script's copy list, so it silently shipped
+# in no release. The app degraded to single-connection and the user saw
+# "aria2c tidak ditemukan". Assert instead of assuming.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$mustHave = @{
+    $FullZip   = @("bin\aria2c.exe", "bin\deno.exe", "ffmpeg\ffmpeg.exe", "models\face_landmarker.task")
+    $UpdateZip = @("bin\aria2c.exe")
+}
+$problems = @()
+foreach ($zipPath in $mustHave.Keys) {
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+    try {
+        $names = $archive.Entries | ForEach-Object { $_.FullName -replace '/', '\' }
+        foreach ($want in $mustHave[$zipPath]) {
+            if (-not ($names | Where-Object { $_ -like "*$want" })) {
+                $problems += ("  {0}: MISSING {1}" -f (Split-Path $zipPath -Leaf), $want)
+            }
+        }
+    } finally {
+        $archive.Dispose()
+    }
+}
+if ($problems.Count -gt 0) {
+    throw "Packaged zip is missing required binaries:`n$($problems -join "`n")"
+}
+Write-Host "[package] Verified: aria2c/deno/ffmpeg/model present in FULL, aria2c in UPDATE."
 
 # --- Report ---
 $fullMb = [math]::Round((Get-Item $FullZip).Length / 1MB, 1)

@@ -283,24 +283,29 @@ def combine_split_screen(
     # hwupload — plain CPU yuv420p graph, MF converts internally. Uses an
     # explicit bitrate because the MF encoder has no usable preset/cq knobs.
     mf_enc_args = ["-c:v", "h264_mf", "-b:v", "5M"]
+    # v2.0.84: the cached pipeline is a *hint*, not a commitment. Previously a
+    # cached winner that then failed produced a single attempt and jumped
+    # straight to CPU, so a session that was working on earlier clips lost its
+    # GPU entirely. Now the cache only reorders the ladder; every other
+    # hardware shape is still tried before falling back to software.
+    hw_attempts: list[tuple[str, list[str], list[str], list[str]]] = [
+        ("hwupload", qsv_head, qsv_graph, video_enc_args),
+        ("probe-style", qsv_head, cpu_graph, video_enc_args),
+    ]
+    if is_mf_available:
+        hw_attempts.append(("mf", [], cpu_graph, mf_enc_args))
+
     attempts: list[tuple[str, list[str], list[str], list[str]]] = []
     if is_qsv:
-        if _qsv_pipeline == "hwupload":
-            attempts = [("hwupload", qsv_head, qsv_graph, video_enc_args)]
-        elif _qsv_pipeline == "probe-style":
-            attempts = [("probe-style", qsv_head, cpu_graph, video_enc_args)]
-        elif _qsv_pipeline == "mf":
-            if is_mf_available:
-                attempts = [("mf", [], cpu_graph, mf_enc_args)]
-            else:
-                attempts = []
+        if _qsv_pipeline:
+            preferred = [a for a in hw_attempts if a[0] == _qsv_pipeline]
+            rest = [a for a in hw_attempts if a[0] != _qsv_pipeline]
+            attempts = preferred + rest
+            if len(attempts) > 1:
+                log(f"Pipeline cache says '{_qsv_pipeline}' — trying it first, "
+                    f"keeping {len(attempts) - 1} hardware fallback(s) armed")
         else:
-            attempts = [
-                ("hwupload", qsv_head, qsv_graph, video_enc_args),
-                ("probe-style", qsv_head, cpu_graph, video_enc_args),
-            ]
-            if is_mf_available:
-                attempts.append(("mf", [], cpu_graph, mf_enc_args))
+            attempts = list(hw_attempts)
     else:
         attempts = [("direct", [], cpu_graph, video_enc_args)]
 
