@@ -175,8 +175,9 @@ def main() -> int:
     check("string pesan lama hanya di fallback", raw == 1, f"ditemukan {raw}x")
 
     # 8. No Cyrillic/homoglyph contamination in the user-facing help text.
-    #    A real slip happened here: "Cliperpro" was written with a Cyrillic
-    #    'е' (U+0435), which is invisible but ships to the user.
+    #    A real slip happened here: the product name was written with a Cyrillic
+    #    ie (U+0435) instead of Latin e -- invisible, but it ships to the user.
+    #    (Described, not reproduced, so this file itself stays scanner-clean.)
     m = re.search(r'fn extraction_failure_help.*?format!\((.*?)\n    \)', src, re.S)
     check("extraction_failure_help ada", m is not None)
     if m:
