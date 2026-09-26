@@ -27,7 +27,8 @@ pub fn run() {
             commands::open_path_in_explorer,
             commands::generate_social_title,
             commands::repliz_list_accounts,
-            commands::repliz_upload
+            commands::repliz_upload,
+            commands::scan_videos
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1127,3 +1127,106 @@ fn resolve_sidecar_binary(app: &tauri::AppHandle) -> Option<PathBuf> {
 
     candidates.into_iter().find(|path| path.exists())
 }
+
+/// Video containers we can hand to the pipeline. Kept in sync with the
+/// filter list in the frontend picker; an unlisted file is not a format we
+/// transcribe or remux anyway.
+const VIDEO_EXTENSIONS: [&str; 10] = [
+    "mp4", "mov", "mkv", "webm", "avi", "m4v", "mpg", "mpeg", "wmv", "flv",
+];
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScannedVideo {
+    path: String,
+    file_name: String,
+    size_bytes: u64,
+}
+
+/// List video files directly inside `dir` (no recursion).
+///
+/// Deliberately non-recursive: users point this at a folder of finished
+/// recordings, and recursing would silently pull in unrelated subfolder
+/// content and turn one click into an hours-long job nobody asked for.
+#[tauri::command]
+pub fn scan_videos(dir: String) -> Result<Vec<ScannedVideo>, String> {
+    let root = PathBuf::from(&dir);
+    if !root.is_dir() {
+        return Err(format!("Not a folder: {}", dir));
+    }
+
+    let entries = fs::read_dir(&root).map_err(|e| format!("Cannot read folder: {}", e))?;
+    let mut found: Vec<ScannedVideo> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !VIDEO_EXTENSIONS.contains(&ext.as_str()) {
+            continue;
+        }
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        if size == 0 {
+            // A zero-byte file would fail later inside ffmpeg with a message
+            // that points nowhere near the real cause.
+            continue;
+        }
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        found.push(ScannedVideo {
+            path: path.to_string_lossy().to_string(),
+            file_name,
+            size_bytes: size,
+        });
+    }
+
+    // Natural order so episode 2 sorts before episode 10.
+    found.sort_by(|a, b| {
+        natural_cmp(&a.file_name, &b.file_name)
+    });
+    Ok(found)
+}
+
+/// Case-insensitive comparison that treats digit runs as numbers, so
+/// "part 2" sorts before "part 10".
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut ai = a.chars().peekable();
+    let mut bi = b.chars().peekable();
+    loop {
+        match (ai.peek().copied(), bi.peek().copied()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(x), Some(y)) => {
+                if x.is_ascii_digit() && y.is_ascii_digit() {
+                    let na: String = ai.by_ref().take_while(|c| c.is_ascii_digit()).collect();
+                    let nb: String = bi.by_ref().take_while(|c| c.is_ascii_digit()).collect();
+                    let va: u128 = na.parse().unwrap_or(0);
+                    let vb: u128 = nb.parse().unwrap_or(0);
+                    match va.cmp(&vb) {
+                        std::cmp::Ordering::Equal => continue,
+                        other => return other,
+                    }
+                }
+                let lx = x.to_ascii_lowercase();
+                let ly = y.to_ascii_lowercase();
+                match lx.cmp(&ly) {
+                    std::cmp::Ordering::Equal => {
+                        ai.next();
+                        bi.next();
+                    }
+                    other => return other,
+                }
+            }
+        }
+    }
+}

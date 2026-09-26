@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clipboard, Play, CirclePlay, Cookie, CheckCircle2, Loader2, ExternalLink, Captions, CaptionsOff, Wand2, ChevronDown, FileVideo, Upload } from "lucide-react";
+import { Clipboard, Play, CirclePlay, Cookie, CheckCircle2, Loader2, ExternalLink, Captions, CaptionsOff, Wand2, ChevronDown, FileVideo, Upload, FolderOpen } from "lucide-react";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -29,6 +30,13 @@ type SubtitleState = "idle" | "loading" | "loaded" | "empty" | "error";
 
 /** Character budget for the optional AI direction, mirrored in the backend. */
 const DIRECTION_MAX = 1000;
+
+/** Mirrors `ScannedVideo` in src-tauri/src/commands/mod.rs. */
+interface ScannedVideo {
+  path: string;
+  fileName: string;
+  sizeBytes: number;
+}
 
 const DIRECTION_PLACEHOLDER =
   'e.g. Clip 1 from 21:30 to 22:25. Take every mention of "investment". Skip the intro and the sponsor read.';
@@ -68,6 +76,11 @@ export function CreatePage() {
   const [useHeatmap, setUseHeatmap] = useState(true);
   const [prePadding, setPrePadding] = useState(3);
   const [postPadding, setPostPadding] = useState(5);
+  // v2.0.90: folder scan. Non-recursive by design — see scan_videos in
+  // src-tauri/src/commands/mod.rs.
+  const [scanDir, setScanDir] = useState("");
+  const [scanned, setScanned] = useState<ScannedVideo[]>([]);
+  const [scanning, setScanning] = useState(false);
   const [clipCount, setClipCount] = useState(5);
   const [subtitleLang, setSubtitleLang] = useState("");
   const [showCookiesDialog, setShowCookiesDialog] = useState(false);
@@ -185,6 +198,30 @@ export function CreatePage() {
     } catch (err) {
       console.error("Failed to pick local video", err);
       toast.error("Gagal memilih file video");
+    }
+  }, []);
+
+  const handleScanFolder = useCallback(async () => {
+    try {
+      const dir = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Pilih folder video",
+      });
+      if (typeof dir !== "string" || !dir) return;
+      setScanDir(dir);
+      setScanning(true);
+      // An empty folder is a normal outcome, not an error worth a red toast.
+      const found = await invoke<ScannedVideo[]>("scan_videos", { dir });
+      setScanned(found);
+      if (found.length === 0) {
+        toast.info("Tidak ada video di folder ini");
+      }
+    } catch (err) {
+      console.error("Failed to scan folder", err);
+      toast.error("Gagal memindai folder");
+    } finally {
+      setScanning(false);
     }
   }, []);
 
@@ -357,13 +394,58 @@ export function CreatePage() {
             <span className="text-sm font-medium text-[var(--color-text-primary)]">
               {localFileName ? "Ganti file video" : "Pilih video dari lokal media"}
             </span>
-            <span className="text-xs text-[var(--color-text-muted)]">
+            <div className="text-xs text-[var(--color-text-muted)]">
               {localFileName
                 ? localFileName
                 : "MP4, MOV, MKV, WEBM, AVI, M4V — audio akan ditranskripsi otomatis untuk deteksi highlight"}
-            </span>
+            </div>
           </div>
         </button>
+      )}
+
+      {/* v2.0.90: folder scan. Lists the videos so a folder of recordings can
+          be browsed without a file dialog per item. Selection still goes
+          through the one-file path, so processing is unchanged. */}
+      {source === "local" && (
+        <div className="space-y-2">
+          <Button
+            variant="outline"
+            onClick={handleScanFolder}
+            disabled={scanning}
+            className="w-full gap-2 rounded-[var(--radius)]"
+          >
+            {scanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />}
+            {scanning ? "Memindai..." : "Scan folder video"}
+          </Button>
+
+          {scanned.length > 0 && (
+            <div className="max-h-64 overflow-y-auto rounded-[var(--radius-sm)] border border-[var(--color-border-light)] divide-y divide-[var(--color-border-light)]">
+              <div className="px-3 py-2 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)] sticky top-0">
+                {scanned.length} video ditemukan di {scanDir.split(/[\\/]/).pop() ?? scanDir}
+              </div>
+              {scanned.map((v) => (
+                <button
+                  key={v.path}
+                  type="button"
+                  onClick={() => {
+                    setLocalPath(v.path);
+                    setLocalFileName(v.fileName);
+                    // Keep the single-file box honest about what is selected.
+                    setScanned((cur) => cur);
+                  }}
+                  className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-3 hover:bg-[var(--color-bg-secondary)] transition-colors cursor-pointer ${
+                    localPath === v.path ? "bg-[var(--color-accent-light)]" : ""
+                  }`}
+                >
+                  <span className="truncate text-[var(--color-text-primary)]">{v.fileName}</span>
+                  <span className="text-xs text-[var(--color-text-muted)] shrink-0">
+                    {(v.sizeBytes / (1024 * 1024)).toFixed(0)} MB
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Main content: Clip Parameters + Thumbnail */}
