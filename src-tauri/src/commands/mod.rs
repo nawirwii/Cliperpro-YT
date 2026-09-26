@@ -676,6 +676,14 @@ fn call_sidecar(
     command: &str,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    with_extraction_retry(|| call_sidecar_once(app, command, payload.clone()))
+}
+
+fn call_sidecar_once(
+    app: &tauri::AppHandle,
+    command: &str,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let request = serde_json::json!({
         "id": "tauri-request",
         "command": command,
@@ -706,7 +714,7 @@ fn call_sidecar(
         .filter(|line| !line.trim().is_empty())
         .rev()
         .find(|line| line.contains("\"ok\""))
-        .ok_or_else(|| format!("Sidecar returned no response. stderr:\n{stderr}"))?;
+        .ok_or_else(|| no_response_error(&stderr))?;
 
     let response: SidecarResponse = serde_json::from_str(response_line).map_err(|e| {
         format!(
@@ -896,6 +904,17 @@ fn call_sidecar_streaming_process(
     payload: serde_json::Value,
     on_event: &Channel<ProcessClipsEvent>,
 ) -> Result<serde_json::Value, String> {
+    with_extraction_retry(|| {
+        call_sidecar_streaming_process_once(app, command, payload.clone(), on_event)
+    })
+}
+
+fn call_sidecar_streaming_process_once(
+    app: &tauri::AppHandle,
+    command: &str,
+    payload: serde_json::Value,
+    on_event: &Channel<ProcessClipsEvent>,
+) -> Result<serde_json::Value, String> {
     let request = serde_json::json!({
         "id": "tauri-request",
         "command": command,
@@ -957,7 +976,7 @@ fn call_sidecar_streaming_process(
     let _ = child.wait();
 
     let response =
-        final_response.ok_or_else(|| format!("Sidecar returned no response. stderr:\n{stderr}"))?;
+        final_response.ok_or_else(|| no_response_error(&stderr))?;
 
     if response.ok {
         response
@@ -973,6 +992,17 @@ fn call_sidecar_streaming_process(
 }
 
 fn call_sidecar_streaming(
+    app: &tauri::AppHandle,
+    command: &str,
+    payload: serde_json::Value,
+    on_event: &Channel<FindHighlightsEvent>,
+) -> Result<serde_json::Value, String> {
+    with_extraction_retry(|| {
+        call_sidecar_streaming_once(app, command, payload.clone(), on_event)
+    })
+}
+
+fn call_sidecar_streaming_once(
     app: &tauri::AppHandle,
     command: &str,
     payload: serde_json::Value,
@@ -1045,7 +1075,7 @@ fn call_sidecar_streaming(
     let _ = child.wait();
 
     let response =
-        final_response.ok_or_else(|| format!("Sidecar returned no response. stderr:\n{stderr}"))?;
+        final_response.ok_or_else(|| no_response_error(&stderr))?;
 
     if response.ok {
         response
@@ -1060,12 +1090,131 @@ fn call_sidecar_streaming(
     }
 }
 
-fn spawn_command(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<std::process::Child, std::io::Error> {
+/// Marker embedded in the extraction-failure message. The retry wrappers match
+/// on it instead of re-parsing prose, so the user-facing text can be reworded
+/// freely without breaking the retry.
+const EXTRACTION_FAILURE_MARKER: &str = "[sidecar-extraction-failure]";
+
+/// Build the error for "the sidecar produced no JSON response".
+///
+/// The extraction failure gets rewritten into actionable instructions; every
+/// other case keeps the original raw-stderr form, because there the traceback
+/// really is the best diagnostic we have.
+fn no_response_error(stderr: &str) -> String {
+    if is_extraction_failure(stderr) {
+        extraction_failure_help(stderr)
+    } else {
+        format!("Sidecar returned no response. stderr:\n{stderr}")
+    }
+}
+
+/// Run one sidecar request, retrying once if the onefile extraction was
+/// destroyed mid-boot.
+///
+/// A single retry is deliberate: the failure is a race between the bootloader
+/// writing ~181 MB and something (antivirus, temp cleaner) deleting it, and a
+/// second extraction usually wins. But this must NOT become a silent retry
+/// loop for genuine bugs — so the retry is limited to the narrow
+/// `is_extraction_failure` signature, and the error the user finally sees is
+/// still the full instruction text, never a generic "failed".
+///
+/// Safe for the streaming callers too, which do emit UI events: a boot-time
+/// extraction failure happens inside the PyInstaller bootloader *before*
+/// `run_loop()` is ever reached, so the sidecar has produced no stdout at all
+/// and there is nothing to duplicate. The guard below is what keeps that true
+/// — a failure after the sidecar started talking cannot match this signature.
+fn with_extraction_retry<T>(
+    mut run: impl FnMut() -> Result<T, String>,
+) -> Result<T, String> {
+    match run() {
+        Err(err) if err.contains(EXTRACTION_FAILURE_MARKER) => run(),
+        other => other,
+    }
+}
+
+/// Scratch dir the onefile sidecar unpacks itself into.
+///
+/// The bundled sidecar is a PyInstaller *onefile* build: it extracts ~181 MB
+/// of libraries into a fresh `%TEMP%\_MEIxxxxxx` folder on EVERY process
+/// start, and `spawn_sidecar` runs once per command. That means a single app
+/// launch unpacks hundreds of MB into the system temp dir, which is exactly
+/// the traffic pattern that Windows Storage Sense, third-party temp cleaners
+/// and antivirus real-time scanning target. Any of them can delete a
+/// just-extracted file, and the symptom is the near-unreadable bootloader
+/// traceback ending in
+/// `FileNotFoundError: ..._MEI000042\base_library.zip`.
+///
+/// PyInstaller's Windows bootloader resolves the `_MEI` folder through
+/// `GetTempPathW`, which honours `TEMP`/`TMP`, so redirecting those two
+/// variables on the child process is enough to move the extraction.
+///
+/// Deliberately NOT placed next to the exe: the NSIS/MSI installers put the
+/// app under Program Files, which a standard user cannot write to, and a
+/// read-only extraction target would fail every launch.
+fn sidecar_scratch_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_data_dir().ok()?.join("sidecar-scratch");
+    fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+/// True when the sidecar died before Python finished booting, i.e. the
+/// onefile extraction was damaged or removed underneath it.
+///
+/// Detected from the bootloader traceback rather than from any message we
+/// control, because the only reliable fingerprints are the `_MEI` folder path
+/// and `base_library.zip` — both emitted by PyInstaller before our code runs
+/// at all. An empty stderr must return false, or a genuine "no output" bug
+/// would be misreported as an antivirus problem.
+fn is_extraction_failure(stderr: &str) -> bool {
+    if stderr.trim().is_empty() {
+        return false;
+    }
+    let mentions_mei = stderr.contains("_MEI");
+    let bootloader = stderr.contains("pyiboot") || stderr.contains("pyimod");
+    let missing = stderr.contains("base_library.zip")
+        || stderr.contains("FileNotFoundError")
+        || stderr.contains("Errno 2");
+    mentions_mei && (bootloader || missing)
+}
+
+/// Turn the raw bootloader traceback into instructions the user can actually
+/// follow. The original message names an internal folder and an errno, which
+/// tells the user nothing about what to do next.
+fn extraction_failure_help(stderr: &str) -> String {
+    format!(
+        "{EXTRACTION_FAILURE_MARKER}\n\
+         Sidecar gagal start: file ekstraksi PyInstaller (folder _MEI) hilang.\n\
+         \n\
+         Penyebab: library sidecar (~181 MB) diekstrak ke folder TEMP setiap kali\n\
+         perintah dijalankan. Antivirus atau pembersih temp(Base storage) menghapus\n\
+         folder itu saat sedang diekstrak.\n\
+         \n\
+         Solusi:\n\
+         1. Buka Windows Security -> Virus & threat protection -> Manage settings\n\
+         2. Turun ke Exclusions -> Add an exclusion -> Folder\n\
+         3. Pilih folder Cliperpro (tempat yt-short-clipper-v2.exe berada)\n\
+         4. Tutup semua jendela Cliperpro, lalu jalankan ulang\n\
+         \n\
+         Detail teknis:\n{stderr}"
+    )
+}
+
+fn spawn_command(
+    program: impl AsRef<std::ffi::OsStr>,
+    args: &[&str],
+    scratch: Option<&std::path::Path>,
+) -> Result<std::process::Child, std::io::Error> {
     let mut cmd = Command::new(program);
     cmd.args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // Redirect the onefile extraction out of %TEMP%. See sidecar_scratch_dir.
+    if let Some(dir) = scratch {
+        cmd.env("TEMP", dir);
+        cmd.env("TMP", dir);
+    }
 
     #[cfg(windows)]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
@@ -1074,8 +1223,10 @@ fn spawn_command(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<
 }
 
 fn spawn_sidecar(app: &tauri::AppHandle) -> Result<std::process::Child, String> {
+    let scratch = sidecar_scratch_dir(app);
+
     if let Some(path) = resolve_sidecar_binary(app) {
-        return spawn_command(path, &[])
+        return spawn_command(path, &[], scratch.as_deref())
             .map_err(|e| format!("Failed to start bundled sidecar: {e}"));
     }
 

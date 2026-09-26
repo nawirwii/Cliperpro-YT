@@ -137,7 +137,7 @@ export const TRANSCRIPTION_PRESETS: TranscriptionPreset[] = [
     local: true,
     models: LOCAL_WHISPER_MODELS.map((m) => m.id),
     localNote:
-      "Model diunduh sekali saat pertama dipakai (butuh internet), lalu tersimpan dan bisa dipakai offline. CATATAN: di CPU lama, transkripsi bisa lebih LAMBAT dari durasi video — video 10 menit bisa butuh 20–40 menit. Untuk CPU lemah pilih 'small' atau 'base', bukan 'turbo'.",
+      "Model diunduh sekali saat pertama dipakai (±75 MB s/d 1,6 GB, butuh internet), lalu tersimpan dan bisa dipakai offline. PENTING: di CPU, transkripsi bisa lebih LAMBAT dari durasi video. Diukur di mesin uji — tiny 1,4x, base 2,3x, small 7,5x durasi audio. Jadi video 43 menit ≈ 1 jam (tiny), 1,7 jam (base), 5 jam (small). PC lama akan lebih lambat lagi. Kalau mengutamakan kecepatan pilih 'tiny' atau 'base'; kalau butuh akurat pilih 'small' atau lebih besar.",
   },
   {
     key: "huggingface",
