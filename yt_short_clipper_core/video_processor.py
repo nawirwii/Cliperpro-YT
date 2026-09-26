@@ -438,6 +438,48 @@ def _cookies_search_dirs() -> list[Path]:
     return dirs
 
 
+_TS_RE = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:[.,](\d{1,3}))?$")
+
+
+def _timestamp_to_seconds(ts: str) -> float | None:
+    """'00:06:20,000' -> 380.0, '1.0' -> 1.0, or None if unrecognised.
+
+    Returning None rather than 0.0 is deliberate. The caller normalises with
+    this value, and a silent 0.0 would rewrite an unparsed timestamp into
+    '00:00:00.000' — which then aborts the cut with a confusing
+    "-to value smaller than -ss". None means "not understood", and the caller
+    passes the original string to ffmpeg untouched, exactly as before.
+    """
+    text = (ts or "").strip()
+    if not text:
+        return None
+    m = _TS_RE.match(text)
+    if m:
+        h, mi, sec, frac = m.groups()
+        millis = int((frac or "0").ljust(3, "0")[:3]) / 1000.0
+        return int(h or 0) * 3600 + int(mi) * 60 + int(sec) + millis
+    try:  # bare seconds, e.g. "1.0", "90", "3723.5" — valid ffmpeg input
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _ffmpeg_timestamp(seconds: float) -> str:
+    """380.0 -> '00:06:20.000' — the form ffmpeg's -ss / -to actually accept.
+
+    The DOT is load-bearing. ffmpeg rejects the SRT/SubRip comma form
+    ('00:06:20,000') on -ss and -to with exit code 234 "Invalid argument",
+    because a comma is not valid in a command-line time value — it only
+    belongs inside subtitle *files*. Verified against ffmpeg 7.1.4: every
+    comma form fails, every dot form succeeds.
+    """
+    total_ms = max(0, int(round(seconds * 1000)))
+    h, rem = divmod(total_ms, 3600_000)
+    mnt, rem = divmod(rem, 60_000)
+    sec, ms = divmod(rem, 1000)
+    return f"{h:02d}:{mnt:02d}:{sec:02d}.{ms:03d}"
+
+
 def cut_video_section(
     full_path: str,
     output_path: str,
@@ -477,12 +519,50 @@ def cut_video_section(
     log("Cutting downloaded video to requested section (exact start, re-encode)...")
 
     # Probe the source for an audio stream (video-only downloads must not
-    # fail on `-c:a aac` when there is no audio input).
+    # fail on `-c:a aac` when there is no audio input) and for its duration.
     probe = subprocess.run(
         [str(ffmpeg_path), "-hide_banner", "-i", str(full_path)],
         capture_output=True, creationflags=flags,
     )
-    has_audio = b"Audio:" in (probe.stderr or b"")
+    probe_err = probe.stderr or b""
+    has_audio = b"Audio:" in probe_err
+
+    # The cut below fails when the requested range sits past the end of the
+    # media, and ffmpeg's own message for that ("Output file is empty")
+    # does not say *why* in terms the user can act on. The container's
+    # duration is already in the probe output, so check it up front.
+    duration = 0.0
+    m = re.search(rb"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", probe_err)
+    if m:
+        h, mi, s = m.groups()
+        duration = int(h) * 3600 + int(mi) * 60 + float(s)
+    # Normalise the requested range to a form ffmpeg's -ss / -to accept.
+    # The caller passes SRT-style timestamps ('00:06:20,000'), which ffmpeg
+    # rejects with exit 234 "Invalid argument" — a comma is only legal inside
+    # subtitle files, never as a command-line time value.
+    #
+    # Only values we actually understood get rewritten. A format we cannot
+    # parse is passed through untouched, preserving the old behaviour for
+    # plain-seconds call sites like "1.0" instead of corrupting them to 0.
+    start_s = _timestamp_to_seconds(start_time)
+    end_s = _timestamp_to_seconds(end_time)
+    if duration > 0 and start_s is not None and start_s >= duration:
+        raise RuntimeError(
+            f"Cannot cut {start_time} -> {end_time}: the source video is only "
+            f"{_ffmpeg_timestamp(duration)} long. The highlight timestamp is "
+            f"past the end of the file -- re-scan the local video so the "
+            f"transcript matches this file."
+        )
+    if duration > 0 and end_s is not None and end_s > duration + 1.0:
+        log(
+            f"⚠️ Requested end {end_time} is past the end of the source "
+            f"({_ffmpeg_timestamp(duration)}) — clamping."
+        )
+        end_s = duration
+    if start_s is not None:
+        start_time = _ffmpeg_timestamp(start_s)
+    if end_s is not None:
+        end_time = _ffmpeg_timestamp(end_s)
 
     if gpu_config and gpu_config.get("available"):
         log(f"Cut encode: GPU {gpu_config.get('name')} (preset={gpu_config.get('preset')})")
@@ -496,6 +576,7 @@ def cut_video_section(
         cut_output = output_path + ".cut.mp4"
         cmd = [
             str(ffmpeg_path), "-y",
+            "-hide_banner", "-loglevel", "error",
             "-ss", start_time,
             "-to", end_time,
             "-i", str(full_path),
@@ -507,8 +588,15 @@ def cut_video_section(
         log(f"Cut ({tag}): {start_time} -> {end_time}")
         result = subprocess.run(cmd, capture_output=True, text=True, creationflags=flags)
         if result.returncode != 0:
+            # Read the TAIL of stderr, never the head: ffmpeg prints its
+            # version banner first, so stderr[:N] is ~always pure banner and
+            # the actual reason never reaches the user or the log. Every other
+            # ffmpeg call site in this project slices [-N:] for that reason.
+            detail = (result.stderr or "").strip()[-800:]
             raise RuntimeError(
-                f"Failed to cut video section with ffmpeg: {result.stderr[:600]}"
+                f"Failed to cut video section with ffmpeg (exit {result.returncode})\n"
+                f"  command: {' '.join(cmd)}\n"
+                f"  reason : {detail or '<ffmpeg produced no stderr>'}"
             )
         shutil.move(cut_output, output_path)
         return output_path
