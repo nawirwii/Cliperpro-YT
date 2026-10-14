@@ -138,11 +138,11 @@ def combine_split_screen(
         # Webcam on top (landscape strip), main video on bottom (portrait)
         # Top pane = webcam (landscape cover-crop)
         filter_parts = [
-            f"[1:v]scale={OUTPUT_WIDTH}:{top_h}:force_original_aspect_ratio=increase,"
+            f"[1:v]fps=30,scale={OUTPUT_WIDTH}:{top_h}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{top_h},"
             f"drawbox=x=0:y=0:w=iw:h={DIVIDER_PX}:color={DIVIDER_COLOR}@1:t=fill,setsar=1[top]",
             # Bottom pane = main video (portrait, fit + center)
-            f"[0:v]scale={OUTPUT_WIDTH}:{bottom_h}:force_original_aspect_ratio=decrease,"
+            f"[0:v]fps=30,scale={OUTPUT_WIDTH}:{bottom_h}:force_original_aspect_ratio=decrease,"
             f"pad={OUTPUT_WIDTH}:{bottom_h}:(ow-iw)/2:(oh-ih)/2,setsar=1[bottom]",
             "[top][bottom]vstack=inputs=2,format=yuv420p[v]",
         ]
@@ -152,12 +152,12 @@ def combine_split_screen(
             # Top pane: fills the pane when the input is already the pane aspect
             # (1080x{top_h} face-tracked portrait). Otherwise fit + center with
             # black bars as a graceful fallback.
-            f"[0:v]scale={OUTPUT_WIDTH}:{top_h}:force_original_aspect_ratio=decrease,"
+            f"[0:v]fps=30,scale={OUTPUT_WIDTH}:{top_h}:force_original_aspect_ratio=decrease,"
             f"pad={OUTPUT_WIDTH}:{top_h}:(ow-iw)/2:(oh-ih)/2,setsar=1[top]",
             # Bottom pane: COVER-CROP into a landscape strip (any aspect fills the
             # 1080x{bottom_h} strip, no bars), then draw the gold divider on its
             # top edge.
-            f"[1:v]scale={OUTPUT_WIDTH}:{bottom_h}:force_original_aspect_ratio=increase,"
+            f"[1:v]fps=30,scale={OUTPUT_WIDTH}:{bottom_h}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{bottom_h},"
             f"drawbox=x=0:y=0:w=iw:h={DIVIDER_PX}:color={DIVIDER_COLOR}@1:t=fill,setsar=1[bottom]",
             "[top][bottom]vstack=inputs=2,format=yuv420p[v]",
@@ -191,6 +191,21 @@ def combine_split_screen(
     gpu_enabled = gpu_config and gpu_config.get("enabled", False) if gpu_config else False
     enc_name = gpu_config.get("encoder") if gpu_enabled else None
     enc_preset = gpu_config.get("preset") if gpu_enabled else None
+
+    # UHD 620-era Windows QSV drivers commonly accept a one-frame probe but
+    # emit zero frames from a complex vstack graph. Skip the doomed GPU ladder
+    # for this adapter so composition starts directly on the reliable CPU path.
+    gpu_name = str((gpu_config or {}).get("name", "")).lower()
+    legacy_intel_qsv = (
+        enc_name == "h264_qsv"
+        and "intel" in gpu_name
+        and any(model in gpu_name for model in ("uhd graphics 620", "uhd 620", "hd graphics 620"))
+    )
+    if legacy_intel_qsv:
+        log("⚠️ Intel UHD 620 QSV unstable for split-screen vstack — using CPU composition directly")
+        enc_name = None
+        enc_preset = None
+        gpu_enabled = False
 
     def build_video_enc_args(name: str | None, preset: str | None) -> list[str]:
         if name == "h264_nvenc":
@@ -267,6 +282,7 @@ def combine_split_screen(
             "-map", "[v]",
             *audio_suffix,
             *enc_args,
+            "-r", "30", "-vsync", "cfr",
             "-t", f"{main_dur:.3f}",
             "-movflags", "+faststart",
             output_path,

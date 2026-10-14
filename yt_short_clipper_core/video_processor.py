@@ -357,6 +357,11 @@ class _YTDlpLogger:
             "Downloading m3u8" in msg or "Downloading item" in msg
         ):
             self._state["download_phase_active"] = True
+            # The manifest/item fetch is real network activity, but yt-dlp
+            # does not emit a progress hook until the first fragment starts.
+            # Refresh the watchdog clock here or a slow m3u8 request is
+            # incorrectly treated as a silent stall.
+            self._state["last_log_ts"] = time.monotonic()
         # yt-dlp's debug channel is extremely noisy (per-fragment bytes),
         # so we only surface the lines that hint at *what* yt-dlp is doing
         # right now, not the byte counters. "Downloading fragment" is
