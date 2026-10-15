@@ -1103,7 +1103,15 @@ def _download_section_module(
         fallback_opts.pop("download_ranges", None)
         fallback_opts.pop("downloader", None)
         fallback_opts.pop("force_keyframes_at_cuts", None)
+        # The fallback must actually switch downloader. ``dict(ydl_opts)``
+        # otherwise keeps aria2c configured, so an aria2c exit code 1 simply
+        # fails a second time and is misleadingly reported as a fallback
+        # failure. yt-dlp's native downloader is the reliable recovery path.
+        fallback_opts.pop("external_downloader", None)
+        fallback_opts.pop("external_downloader_args", None)
         fallback_opts["format"] = _build_format_selector(max_height)
+        log("🔁 aria2c gagal — fallback memakai downloader bawaan yt-dlp (1 koneksi).")
+        _remove_download_artifacts(output_path, log)
         download_state["last_log_ts"] = time.monotonic()
         download_state["last_pct"] = None
         download_state["last_detail"] = "(fallback retry)"
