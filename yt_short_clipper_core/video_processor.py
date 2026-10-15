@@ -184,6 +184,37 @@ def _find_downloaded_file(output_path: str) -> str:
     raise RuntimeError(f"Downloaded section file not found: {output_path}")
 
 
+def _remove_download_artifacts(output_path: str, log: LogFn | None = None) -> None:
+    """Remove stale yt-dlp outputs before a new download attempt.
+
+    yt-dlp's FFmpeg postprocessor promotes ``<stem>.temp.mp4`` to the final
+    ``<stem>.mp4`` with ``os.replace``. On Windows that promotion raises
+    WinError 183 when a previous client/fallback attempt left the destination
+    behind. Retries must therefore start from a clean artifact set.
+    """
+    target = Path(output_path)
+    candidates = {
+        target,
+        target.with_suffix(".mp4"),
+        target.with_suffix(".part"),
+        target.with_suffix(".temp.mp4"),
+        target.with_suffix(".ytdl"),
+    }
+    # Also cover extension changes made by yt-dlp (webm/mkv) and sidecars.
+    if target.parent.exists():
+        candidates.update(target.parent.glob(f"{target.stem}.*"))
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            path.unlink()
+        except PermissionError:
+            # Do not hide a real antivirus/file-lock problem; the subsequent
+            # yt-dlp error remains actionable and can be retried by the caller.
+            if log:
+                log(f"⚠️ Cannot remove stale download artifact: {path}")
+
+
 def _setup_ytdlp_env() -> None:
     """Ensure Deno is in PATH for yt-dlp remote components."""
     deno_path = get_deno_path()
@@ -1006,6 +1037,11 @@ def _download_section_module(
             # Retry-on-WinError-32 loop: the final .part → .mp4 rename can
             # fail on Windows when antivirus briefly locks the file.
             for attempt in range(1, 4):
+                # Every retry must use a clean output stem. In particular,
+                # yt-dlp/FFmpeg can leave the final .mp4 behind after a
+                # postprocessor failure, causing WinError 183 on the next
+                # .temp.mp4 -> .mp4 promotion.
+                _remove_download_artifacts(output_path, log)
                 try:
                     _run_download(client_opts, f"c{client_idx}-a{attempt}")
                     return _cut_section(_find_downloaded_file(output_path))
@@ -1080,6 +1116,7 @@ def _download_section_module(
         )
         _watchdog_fallback.start()
         try:
+            _remove_download_artifacts(output_path, log)
             _run_download(fallback_opts, "fallback")
         except Exception as e2:
             msg2 = str(e2)
