@@ -17,9 +17,13 @@ LogFn = Callable[[str], None]
 # Shared by http and https so there is a single source of truth for the
 # aria2c tuning (see _build_downloader_opts for what each flag buys).
 _ARIA2_ARGS = [
-    "-x16",                    # max 16 connections per server
-    "-s16",                    # split into 16 pieces
-    "-j16",                    # 16 parallel downloads
+    # Keep concurrency moderate: YouTube's googlevideo CDN frequently drops
+    # overly aggressive range bursts, leaving orphaned .part audio files.
+    # 4 connections is still faster than a single connection without causing
+    # the repeated connect-timeout storm seen on slower Windows networks.
+    "-x4",                     # max 4 connections per server
+    "-s4",                     # split into 4 pieces
+    "-j4",                     # 4 parallel downloads
     "-k1M",                    # only split files larger than 1 MiB
     "--file-allocation=none",  # no sparse pre-allocation
     "--summary-interval=0",    # silence aria2's own status line
@@ -419,7 +423,18 @@ class _YTDlpLogger:
         self._log(f"⚠️ {msg}")
 
     def error(self, msg: str) -> None:
-        self._log(f"❌ {msg}")
+        # yt-dlp reports transient CDN retry messages through ``error`` even
+        # while the same download is still progressing. Marking every one red
+        # makes a recoverable retry look like a failed job. Only the final
+        # exception raised by YoutubeDL should be fatal (it is propagated by
+        # _run_download and logged by the caller).
+        transient = (
+            "Got error:" in msg
+            or "Giving up after" in msg
+            or "Connection to" in msg and "timed out" in msg
+            or ".part" in msg and "cannot find the file" in msg.lower()
+        )
+        self._log(f"⚠️ {msg}" if transient else f"❌ {msg}")
 
 
 def _get_cookies_path() -> str:
@@ -761,10 +776,12 @@ def _download_section_module(
         "throttled_rate": 100 * 1024,
         "sleep_interval": 1.0,
         "max_sleep_interval": 5.0,
-        # Fail fast on dead connections (ISP NAT drops, throttled YouTube):
-        "socket_timeout": 10,
-        "retries": 3,
-        "fragment_retries": 3,
+        # Allow slow Indonesian/Windows CDN handshakes to complete. A 10s
+        # timeout was too aggressive: one audio range could time out while
+        # video kept progressing, leaving a missing .m4a.part artifact.
+        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 5,
         "extractor_retries": 2,
         # CRITICAL (2026-09): force player clients that do NOT require the
         # BotGuard JS challenge. The defaults for authenticated sessions are
