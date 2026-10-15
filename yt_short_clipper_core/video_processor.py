@@ -700,6 +700,11 @@ def _download_section_module(
     cookies_path = _get_cookies_path()
 
     format_selector = _build_format_selector(max_height)
+    # Download into a private staging stem. The requested output_path is also
+    # the cut destination; using it as yt-dlp's outtmpl makes FFmpeg's
+    # ``.temp.mp4 -> .mp4`` promotion collide with an existing final file on
+    # Windows (WinError 183). Only the completed local cut is written there.
+    download_path = f"{output_path}.download"
 
     # v2.0.32: Ranged section download (download_ranges) was trialled here
     # (2026.8.19) to fetch only the highlight's time window instead of the
@@ -720,7 +725,7 @@ def _download_section_module(
         "format": format_selector,
         "format_sort": ["res", "br"],
         "merge_output_format": "mp4",
-        "outtmpl": output_path,
+        "outtmpl": download_path,
         "quiet": True,
         "no_warnings": False,
         # v2.0.28: suppress yt-dlp's OWN progress rendering entirely
@@ -1041,10 +1046,10 @@ def _download_section_module(
                 # yt-dlp/FFmpeg can leave the final .mp4 behind after a
                 # postprocessor failure, causing WinError 183 on the next
                 # .temp.mp4 -> .mp4 promotion.
-                _remove_download_artifacts(output_path, log)
+                _remove_download_artifacts(download_path, log)
                 try:
                     _run_download(client_opts, f"c{client_idx}-a{attempt}")
-                    return _cut_section(_find_downloaded_file(output_path))
+                    return _cut_section(_find_downloaded_file(download_path))
                 except _SustainedThrottle:
                     # Not a hard failure — break to the next client, but
                     # keep the exception as e_download so a final failure
@@ -1111,7 +1116,7 @@ def _download_section_module(
         fallback_opts.pop("external_downloader_args", None)
         fallback_opts["format"] = _build_format_selector(max_height)
         log("🔁 aria2c gagal — fallback memakai downloader bawaan yt-dlp (1 koneksi).")
-        _remove_download_artifacts(output_path, log)
+        _remove_download_artifacts(download_path, log)
         download_state["last_log_ts"] = time.monotonic()
         download_state["last_pct"] = None
         download_state["last_detail"] = "(fallback retry)"
@@ -1124,7 +1129,7 @@ def _download_section_module(
         )
         _watchdog_fallback.start()
         try:
-            _remove_download_artifacts(output_path, log)
+            _remove_download_artifacts(download_path, log)
             _run_download(fallback_opts, "fallback")
         except Exception as e2:
             msg2 = str(e2)
@@ -1132,7 +1137,7 @@ def _download_section_module(
             raise RuntimeError(f"Failed to download video section: {msg2}")
 
         # Fallback downloaded the full video — cut locally (same helper as primary)
-        return _cut_section(_find_downloaded_file(output_path))
+        return _cut_section(_find_downloaded_file(download_path))
 
     try:
         result_path = _do_download()
