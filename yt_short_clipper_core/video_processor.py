@@ -1028,7 +1028,13 @@ def _download_section_module(
         up, because the per-connection cap is decided per client identity.
         """
         e_download: Exception | None = None
+        force_native_fallback = False
         for client_idx, clients in enumerate(_CLIENT_LADDER):
+            # A missing .download.part is an aria2c/temp-file failure, not a
+            # YouTube client failure. Do not waste time retrying the same
+            # broken external downloader with every player client.
+            if force_native_fallback:
+                break
             # Reset per-attempt throttle bookkeeping, otherwise a previous
             # attempt's flag would immediately abort the retry.
             download_state["throttle_since"] = None
@@ -1076,6 +1082,17 @@ def _download_section_module(
                 except Exception as e:
                     e_download = e
                     msg = str(e)
+                    lowered_msg = msg.lower()
+                    if aria2_path and (
+                        ("winerror 2" in lowered_msg and ".download.part" in lowered_msg)
+                        or (".download.part" in lowered_msg and "cannot find" in lowered_msg)
+                    ):
+                        force_native_fallback = True
+                        log(
+                            "⚠️ aria2c kehilangan file temporary .download.part — "
+                            "langsung beralih ke downloader bawaan yt-dlp."
+                        )
+                        break
                     rename_locked = (
                         "Unable to rename file" in msg
                         or "WinError 32" in msg
