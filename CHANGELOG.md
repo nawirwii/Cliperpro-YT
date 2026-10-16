@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- Split-screen composition on Intel UHD 620 (and HD 620) now tries the Windows Media Foundation
+  hardware encoder (`h264_mf`) before falling back to CPU. The QSV driver on these adapters is
+  unstable with complex vstack graphs, but Media Foundation is a separate OS-level hardware path,
+  so encoding can still be GPU-accelerated where QSV cannot be used.
+
 ## [2.0.39] - 2026-09-21
 ### Added
 - Caption Style selector (6 styles) in Process Clips dialog.

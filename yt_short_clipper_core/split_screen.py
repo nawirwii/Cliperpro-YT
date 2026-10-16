@@ -193,8 +193,9 @@ def combine_split_screen(
     enc_preset = gpu_config.get("preset") if gpu_enabled else None
 
     # UHD 620-era Windows QSV drivers commonly accept a one-frame probe but
-    # emit zero frames from a complex vstack graph. Skip the doomed GPU ladder
-    # for this adapter so composition starts directly on the reliable CPU path.
+    # emit zero frames from a complex vstack graph. Skip the doomed QSV ladder
+    # for this adapter, but still try Windows Media Foundation (h264_mf): it
+    # is a separate OS-level hardware path that does not touch the QSV driver.
     gpu_name = str((gpu_config or {}).get("name", "")).lower()
     legacy_intel_qsv = (
         enc_name == "h264_qsv"
@@ -202,7 +203,7 @@ def combine_split_screen(
         and any(model in gpu_name for model in ("uhd graphics 620", "uhd 620", "hd graphics 620"))
     )
     if legacy_intel_qsv:
-        log("⚠️ Intel UHD 620 QSV unstable for split-screen vstack — using CPU composition directly")
+        log("⚠️ Intel UHD 620 QSV unstable for split-screen vstack — trying Media Foundation hardware encoder")
         enc_name = None
         enc_preset = None
         gpu_enabled = False
@@ -224,6 +225,8 @@ def combine_split_screen(
     video_enc_args = build_video_enc_args(enc_name, enc_preset)
     if enc_name:
         log(f"Using GPU encoder: {enc_name} (preset={enc_preset})")
+    elif legacy_intel_qsv and is_mf_available:
+        log("Trying Media Foundation hardware encoder (h264_mf), CPU fallback armed")
     else:
         log(f"Using CPU encoder: libx264")
 
@@ -329,6 +332,11 @@ def combine_split_screen(
                     f"keeping {len(attempts) - 1} hardware fallback(s) armed")
         else:
             attempts = list(hw_attempts)
+    elif legacy_intel_qsv and is_mf_available:
+        # UHD 620: the QSV pipelines above are known-broken on this adapter,
+        # but Media Foundation is an independent hardware encoder that takes
+        # plain CPU frames — try it before falling back to software encoding.
+        attempts = [("mf", [], cpu_graph, mf_enc_args)]
     else:
         attempts = [("direct", [], cpu_graph, video_enc_args)]
 
@@ -339,7 +347,7 @@ def combine_split_screen(
         result = subprocess.run(cmd, capture_output=True, text=True, creationflags=_SUBPROCESS_FLAGS)
         if result.returncode == 0:
             winner_label = label
-            if enc_name and label != "direct":
+            if label == "mf" or (enc_name and label != "direct"):
                 shown_name = "h264_mf" if label == "mf" else enc_name
                 log(f"Using GPU encoder: {shown_name} (pipeline={label})")
             break
@@ -348,8 +356,9 @@ def combine_split_screen(
     # Graceful fallback: if every hardware pipeline failed (driver quirks,
     # e.g. QSV -22 at init), retry ONCE on CPU so the clip still completes
     # instead of crashing the whole session. The user sees a clear warning.
-    if result is not None and result.returncode != 0 and enc_name:
-        log(f"⚠️ Hardware encoder {enc_name} failed — retrying with CPU (libx264)")
+    if result is not None and result.returncode != 0 and (enc_name or legacy_intel_qsv):
+        failed_name = enc_name if enc_name else "h264_mf"
+        log(f"⚠️ Hardware encoder {failed_name} failed — retrying with CPU (libx264)")
         _qsv_pipeline = None  # next clip should re-probe hardware (maybe transient)
         cpu_cmd = build_video_cmd(
             [],
