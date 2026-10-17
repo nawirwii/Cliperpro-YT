@@ -1193,12 +1193,14 @@ def _download_section_module(
             log(f"Fallback download also failed: {msg2[:200]}")
             raise RuntimeError(f"Failed to download video section: {msg2}")
 
-        # Fallback downloaded the full video — return it; the caller cuts.
-        return _find_downloaded_file(download_path)
+        # Fallback downloaded the full video — cache it too; the caller cuts.
+        full_source = _find_downloaded_file(download_path)
+        _FULL_SOURCE_CACHE[(url, max_height)] = full_source
+        return full_source
 
     try:
         full_source = _do_download()
-        _FULL_SOURCE_CACHE[cache_key] = full_source
+        _FULL_SOURCE_CACHE[(url, max_height)] = full_source
     finally:
         stop_evt.set()
         hb_thread.join(timeout=2)
