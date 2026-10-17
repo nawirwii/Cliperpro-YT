@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [2.0.101] - 2026-10-17
 ### Added
 - One-click Style Presets in the Process Clips dialog (Podcast / Gaming /
   Ceramah): a single tap applies caption style, reframe mode, watermark
