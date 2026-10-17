@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.0.104] - 2026-10-18
+### Fixed
+- Credit watermark position moved to (0.5, 0.3) — horizontally centered,
+  upper third of the frame — as the default; stale pre-v2.0.99 configs
+  (0.03, 0.72) are migrated there automatically on load.
+
 ## [2.0.103] - 2026-10-18
 ### Fixed
 - Credit watermark clipped at the left edge for configs saved before v2.0.99:
