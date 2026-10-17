@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [2.0.102] - 2026-10-17
+### Fixed
+- `NameError: cache_key is not defined` in `_download_section_module`
+  (download-once cache) — the cache key is now built inline from
+  `(url, max_height)`, and fallback downloads also populate the cache so the
+  next section never re-downloads.
+
 ## [2.0.101] - 2026-10-17
 ### Added
 - One-click Style Presets in the Process Clips dialog (Podcast / Gaming /
