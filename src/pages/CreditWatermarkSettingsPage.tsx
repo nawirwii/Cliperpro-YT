@@ -23,7 +23,7 @@ export function CreditWatermarkSettingsPage() {
   const [fontSize, setFontSize] = useState(24);
   const [opacity, setOpacity] = useState(0.7);
   const [posX, setPosX] = useState(0.5);
-  const [posY, setPosY] = useState(0.5);
+  const [posY, setPosY] = useState(0.3);
   const [saving, setSaving] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
