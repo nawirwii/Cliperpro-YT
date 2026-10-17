@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Film, AlignLeft, Quote, Image as ImageIcon, User, ScanFace, Square, Eye, Sparkles, Zap, MonitorPlay, FolderOpen, DownloadCloud, Volume2 } from "lucide-react";
+import { X, Film, AlignLeft, Quote, Image as ImageIcon, User, ScanFace, Square, Eye, Sparkles, Zap, MonitorPlay, FolderOpen, DownloadCloud, Volume2, Mic, Gamepad2, MoonStar, type LucideIcon } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -10,6 +10,7 @@ import type { ReframeMode, CenteredBackground, DownloadQuality } from "@/hooks/p
 
 export type { ProcessOptions } from "@/hooks/processClips";
 import type { ProcessOptions } from "@/hooks/processClips";
+import { STYLE_PRESETS, STYLE_PRESET_STORAGE_KEY, getStylePreset, type StylePreset } from "@/config/stylePresets";
 
 const QUALITY_OPTIONS: { value: DownloadQuality; label: string; badge: string; badgeClass: string; note: string }[] = [
   {
@@ -79,6 +80,12 @@ interface ProcessConfirmDialogProps {
 
 export const CAPTION_STYLES = ["Modern Yellow", "Neon Green", "Boxed White", "Impact Shadow", "Gold Outline", "Pink Outline"];
 
+const PRESET_ICONS: Record<string, LucideIcon> = {
+  podcast: Mic,
+  gaming: Gamepad2,
+  ceramah: MoonStar,
+};
+
 export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onConfirm, onCancel }: ProcessConfirmDialogProps) {
   const { config } = useConfigStore();
 
@@ -97,6 +104,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   const [splitMainVolume, setSplitMainVolume] = useState(100);
   const [splitSecondVolume, setSplitSecondVolume] = useState(100);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [activePreset, setActivePreset] = useState<string | null>(null);
 
   const handlePickWebcam = async () => {
     try {
@@ -115,6 +123,36 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       console.error("Failed to pick video", err);
     }
   };
+
+  const applyPreset = (preset: StylePreset) => {
+    const o = preset.options;
+    setAddCaptions(o.addCaptions);
+    setAddHook(o.addHook);
+    setAddWatermark(o.addWatermark);
+    setAddCreditWatermark(o.addCreditWatermark);
+    setCaptionStyle(o.captionStyle);
+    setReframeMode(o.reframeMode);
+    setCenteredBackground(o.centeredBackground);
+    setDownloadQuality(o.downloadQuality);
+    setActivePreset(preset.id);
+    try {
+      localStorage.setItem(STYLE_PRESET_STORAGE_KEY, preset.id);
+    } catch {
+      /* storage unavailable — preset still applies for this session */
+    }
+  };
+
+  // Auto-apply the last used preset when the dialog opens, so the style
+  // doesn't have to be re-picked for every video.
+  useEffect(() => {
+    try {
+      const preset = getStylePreset(localStorage.getItem(STYLE_PRESET_STORAGE_KEY));
+      if (preset) applyPreset(preset);
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Trap Escape key
   useEffect(() => {
@@ -173,7 +211,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
         : "Unavailable — this video has no original subtitle track",
       icon: <AlignLeft className="w-5 h-5 text-[var(--color-accent)]" />,
       enabled: addCaptions && captionsAvailable,
-      onToggle: setAddCaptions,
+      onToggle: (v: boolean) => { setAddCaptions(v); setActivePreset(null); },
       disabled: !captionsAvailable,
     },
     {
@@ -182,7 +220,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       description: "AI-generated hook shown over the opening seconds",
       icon: <Quote className="w-5 h-5 text-[var(--color-accent)]" />,
       enabled: addHook,
-      onToggle: setAddHook,
+      onToggle: (v: boolean) => { setAddHook(v); setActivePreset(null); },
     },
     {
       key: "addWatermark",
@@ -190,7 +228,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       description: "Overlay a logo image on each clip",
       icon: <ImageIcon className="w-5 h-5 text-[var(--color-accent)]" />,
       enabled: addWatermark,
-      onToggle: setAddWatermark,
+      onToggle: (v: boolean) => { setAddWatermark(v); setActivePreset(null); },
     },
     {
       key: "addCreditWatermark",
@@ -229,6 +267,37 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
               Choose which enhancements to apply:
             </p>
 
+            {/* Style presets — one click applies caption style, reframe mode, watermark toggles & quality */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">
+                Style Preset
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {STYLE_PRESETS.map((preset) => {
+                  const Icon = PRESET_ICONS[preset.id] ?? Sparkles;
+                  const active = activePreset === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      onClick={() => applyPreset(preset)}
+                      className={`flex flex-col items-center gap-1 p-3 rounded-[var(--radius-sm)] border text-center transition-colors ${
+                        active
+                          ? "border-[var(--color-accent)] bg-[var(--color-bg-secondary)]"
+                          : "border-transparent bg-[var(--color-bg-secondary)] hover:border-[var(--color-border-light)]"
+                      }`}
+                    >
+                      <Icon className="w-5 h-5 text-[var(--color-accent)]" />
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">{preset.name}</p>
+                      <p className="text-[10px] text-[var(--color-text-muted)] leading-tight">{preset.tagline}</p>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-[var(--color-text-muted)] italic">
+                One click applies the full style. Your last preset is applied automatically next time.
+              </p>
+            </div>
+
             {/* Download quality selector */}
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
@@ -241,7 +310,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                 {QUALITY_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
-                    onClick={() => setDownloadQuality(opt.value)}
+                    onClick={() => { setDownloadQuality(opt.value); setActivePreset(null); }}
                     className={`relative flex flex-col items-center gap-1 p-2.5 rounded-[var(--radius-sm)] border text-center transition-colors ${
                       downloadQuality === opt.value
                         ? "border-[var(--color-accent)] bg-[var(--color-bg-secondary)]"
@@ -275,7 +344,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => setReframeMode("face")}
+                  onClick={() => { setReframeMode("face"); setActivePreset(null); }}
                   className={`relative flex flex-col gap-1.5 p-3 rounded-[var(--radius-sm)] border text-left transition-colors ${
                     reframeMode === "face"
                       ? "border-[var(--color-accent)] bg-[var(--color-bg-secondary)]"
@@ -291,7 +360,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                   <p className="text-xs text-[var(--color-text-muted)]">AI tracks the speaker — slower</p>
                 </button>
                 <button
-                  onClick={() => setReframeMode("centered")}
+                  onClick={() => { setReframeMode("centered"); setActivePreset(null); }}
                   className={`relative flex flex-col gap-1.5 p-3 rounded-[var(--radius-sm)] border text-left transition-colors ${
                     reframeMode === "centered"
                       ? "border-[var(--color-accent)] bg-[var(--color-bg-secondary)]"
@@ -317,7 +386,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => setCenteredBackground("black")}
+                    onClick={() => { setCenteredBackground("black"); setActivePreset(null); }}
                     className={`flex items-center gap-2 p-2.5 rounded-[var(--radius-sm)] border text-left transition-colors ${
                       centeredBackground === "black"
                         ? "border-[var(--color-accent)] bg-[var(--color-bg-secondary)]"
@@ -328,7 +397,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                     <span className="text-sm text-[var(--color-text-primary)]">Black bars</span>
                   </button>
                   <button
-                    onClick={() => setCenteredBackground("blurred")}
+                    onClick={() => { setCenteredBackground("blurred"); setActivePreset(null); }}
                     className={`flex items-center gap-2 p-2.5 rounded-[var(--radius-sm)] border text-left transition-colors ${
                       centeredBackground === "blurred"
                         ? "border-[var(--color-accent)] bg-[var(--color-bg-secondary)]"
@@ -444,7 +513,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                       </p>
                     </div>
                   </div>
-                  <Switch checked={addCreditWatermark} onCheckedChange={setAddCreditWatermark} />
+                  <Switch checked={addCreditWatermark} onCheckedChange={(v) => { setAddCreditWatermark(v); setActivePreset(null); }} />
                 </div>
 
                 {addCreditWatermark && (
@@ -467,7 +536,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                     {CAPTION_STYLES.map((s) => (
                       <button
                         key={s}
-                        onClick={() => setCaptionStyle(s)}
+                        onClick={() => { setCaptionStyle(s); setActivePreset(null); }}
                         className={`px-2 py-1.5 rounded-[var(--radius-sm)] border text-[10px] font-medium transition-colors ${
                           captionStyle === s
                             ? "border-[var(--color-accent)] bg-[var(--color-bg-primary)] text-[var(--color-accent)]"
