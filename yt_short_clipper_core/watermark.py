@@ -152,7 +152,7 @@ def apply_watermark(
         # Position is the CENTER of the credit text on both axes, so
         # (0.5, 0.5) places it exactly in the middle of the frame.
         pos_x = credit_watermark.get("position_x", 0.5)
-        pos_y = credit_watermark.get("position_y", 0.5)
+        pos_y = credit_watermark.get("position_y", 0.3)
         # Nawir: keep the credit above the bottom UI-button row so it isn't
         # clipped/overlap by on-screen controls. Anything below y=0.75 is
         # pulled up to 0.72 — bottom presets must not sit behind the player
