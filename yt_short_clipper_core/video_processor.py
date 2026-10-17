@@ -37,6 +37,14 @@ _ARIA2_ARGS = [
 _SUSTAINED_THROTTLE_BPS = 40 * 1024
 _SUSTAINED_THROTTLE_SECS = 60
 
+# Full-video download cache: (url, max_height) -> local path of the COMPLETE
+# downloaded video. Previously every highlight re-downloaded the ENTIRE video
+# (full-download + local cut per section), so N highlights meant N full
+# downloads of the same file. Now the first section downloads the full video
+# once; the rest cut their sections from the cached file with ffmpeg.
+# Keyed by (url, max_height) so different quality caps don't collide.
+_FULL_SOURCE_CACHE: dict[tuple[str, int], str] = {}
+
 # Player clients to try, in order. Each is JS-less (no po_token challenge),
 # and YouTube treats them as separate identities — so when one gets capped,
 # the next often does not. Ordered by how reliably they return stream
@@ -685,6 +693,17 @@ def download_video_section(
     start_clean = start_time.replace(",", ".")
     end_clean = end_time.replace(",", ".")
 
+    # Fast path: the full video for this (url, quality) was already downloaded
+    # by an earlier section — cut locally, no download at all.
+    cache_key = (url, max_height)
+    cached_full = _FULL_SOURCE_CACHE.get(cache_key)
+    if cached_full and Path(cached_full).exists():
+        log("Memakai video full dari cache (tanpa download ulang) — memotong section...")
+        return cut_video_section(
+            cached_full, output_path, start_clean, end_clean,
+            log=log, gpu_config=gpu_config,
+        )
+
     if is_ytdlp_module_available():
         return _download_section_module(
             url, start_clean, end_clean, output_path, log, max_height, gpu_config
@@ -1016,7 +1035,11 @@ def _download_section_module(
         )
 
     def _do_download() -> str:
-        """Primary: multi-connection full download + local cut → fallback.
+        """Primary: multi-connection full download → fallback.
+
+        Returns the path of the COMPLETE downloaded video (no section cut —
+        the caller cuts sections from it, possibly reusing it for other
+        sections via _FULL_SOURCE_CACHE).
 
         Kept as the tested, reliable path (v2.0.31+): download the whole
         video, then cut the section locally with ffmpeg. Ranged section
@@ -1072,7 +1095,7 @@ def _download_section_module(
                 _remove_download_artifacts(download_path, log)
                 try:
                     _run_download(client_opts, f"c{client_idx}-a{attempt}")
-                    return _cut_section(_find_downloaded_file(download_path))
+                    return _find_downloaded_file(download_path)
                 except _SustainedThrottle:
                     # Not a hard failure — break to the next client, but
                     # keep the exception as e_download so a final failure
@@ -1170,13 +1193,14 @@ def _download_section_module(
             log(f"Fallback download also failed: {msg2[:200]}")
             raise RuntimeError(f"Failed to download video section: {msg2}")
 
-        # Fallback downloaded the full video — cut locally (same helper as primary)
-        return _cut_section(_find_downloaded_file(download_path))
+        # Fallback downloaded the full video — return it; the caller cuts.
+        return _find_downloaded_file(download_path)
 
     try:
-        result_path = _do_download()
+        full_source = _do_download()
+        _FULL_SOURCE_CACHE[cache_key] = full_source
     finally:
         stop_evt.set()
         hb_thread.join(timeout=2)
 
-    return result_path
+    return _cut_section(full_source)
