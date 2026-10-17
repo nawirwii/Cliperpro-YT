@@ -207,10 +207,20 @@ function mergeConfig(config: Partial<AppConfig> | undefined): AppConfig {
       ...DEFAULT_CONFIG.watermark,
       ...config?.watermark,
     },
-    creditWatermark: {
-      ...DEFAULT_CONFIG.creditWatermark,
-      ...config?.creditWatermark,
-    },
+    creditWatermark: (() => {
+      const cw = {
+        ...DEFAULT_CONFIG.creditWatermark,
+        ...config?.creditWatermark,
+      };
+      // Migrate configs saved before v2.0.99: position_x used to anchor the
+      // TOP-LEFT corner of the credit text; since v2.0.99 it anchors the
+      // CENTER. The legacy default x=0.03 as a center point pushes the text
+      // off the left edge of the frame, so reset it to true center.
+      if (cw.positionX === 0.03) {
+        cw.positionX = 0.5;
+      }
+      return cw;
+    })(),
     hookStyle: {
       ...DEFAULT_CONFIG.hookStyle,
       ...config?.hookStyle,
