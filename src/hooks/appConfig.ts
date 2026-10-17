@@ -99,8 +99,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     color: "#FFFFFF",
     fontSize: 24,
     opacity: 0.7,
-    positionX: 0.03,
-    positionY: 0.72,
+    positionX: 0.5,
+    positionY: 0.5,
   },
   hookStyle: {
     fontName: "Arial",
