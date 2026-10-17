@@ -22,8 +22,8 @@ export function CreditWatermarkSettingsPage() {
   const [color, setColor] = useState("#FFFFFF");
   const [fontSize, setFontSize] = useState(24);
   const [opacity, setOpacity] = useState(0.7);
-  const [posX, setPosX] = useState(0.03);
-  const [posY, setPosY] = useState(0.92);
+  const [posX, setPosX] = useState(0.5);
+  const [posY, setPosY] = useState(0.5);
   const [saving, setSaving] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -274,6 +274,7 @@ export function CreditWatermarkSettingsPage() {
                 style={{
                   left: `${posX * CANVAS_W}px`,
                   top: `${posY * CANVAS_H}px`,
+                  transform: "translate(-50%, -50%)",
                   color,
                   fontSize: `${fontSize}px`,
                   opacity,
