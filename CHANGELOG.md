@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.99] - 2026-10-17
+## [2.0.100] - 2026-10-17
 ### Added
 - Download full source video ONCE per (url, quality) and cut all highlight
   sections from the cached file (`_FULL_SOURCE_CACHE` in `video_processor.py`).
