@@ -149,8 +149,10 @@ def apply_watermark(
         color = credit_watermark.get("color", "#FFFFFF")
         font_size = credit_watermark.get("font_size", 24)
         opacity = credit_watermark.get("opacity", 0.7)
-        pos_x = credit_watermark.get("position_x", 0.03)
-        pos_y = credit_watermark.get("position_y", 0.92)
+        # Position is the CENTER of the credit text on both axes, so
+        # (0.5, 0.5) places it exactly in the middle of the frame.
+        pos_x = credit_watermark.get("position_x", 0.5)
+        pos_y = credit_watermark.get("position_y", 0.5)
         # Nawir: keep the credit above the bottom UI-button row so it isn't
         # clipped/overlap by on-screen controls. Anything below y=0.75 is
         # pulled up to 0.72 — bottom presets must not sit behind the player
@@ -181,7 +183,7 @@ def apply_watermark(
             f"text='{escaped_display}':"
             f"fontsize={font_size}:"
             f"fontcolor=0x{ff_color}{alpha_hex}{fontfile_part}:"
-            f"x=main_w*{pos_x}:y=main_h*{pos_y}:"
+            f"x=(main_w*{pos_x}-text_w/2):y=(main_h*{pos_y}-text_h/2):"
             f"box=1:boxcolor=black@0.5:boxborderw=5:"
             f"shadowcolor=black@0.5:shadowx=1:shadowy=1"
         )
