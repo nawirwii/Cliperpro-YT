@@ -100,7 +100,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     fontSize: 24,
     opacity: 0.7,
     positionX: 0.5,
-    positionY: 0.5,
+    positionY: 0.3,
   },
   hookStyle: {
     fontName: "Arial",
@@ -212,11 +212,17 @@ function mergeConfig(config: Partial<AppConfig> | undefined): AppConfig {
         ...DEFAULT_CONFIG.creditWatermark,
         ...config?.creditWatermark,
       };
-      // Migrate configs saved before v2.0.99: position_x used to anchor the
+      // Migrate configs saved before v2.0.99: position used to anchor the
       // TOP-LEFT corner of the credit text; since v2.0.99 it anchors the
-      // CENTER. The legacy default x=0.03 as a center point pushes the text
-      // off the left edge of the frame, so reset it to true center.
-      if (cw.positionX === 0.03) {
+      // CENTER of the text.
+      // - legacy default x=0.03 as a center point pushes the text off the
+      //   left edge of the frame → reset to 0.5.
+      // - legacy default y=0.72 sat too low; the intended spot is the upper
+      //   third of the frame (y=0.3) → migrate untouched old defaults there.
+      if (cw.positionX === 0.03 && cw.positionY === 0.72) {
+        cw.positionX = 0.5;
+        cw.positionY = 0.3;
+      } else if (cw.positionX === 0.03) {
         cw.positionX = 0.5;
       }
       return cw;
