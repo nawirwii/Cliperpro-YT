@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [2.0.103] - 2026-10-18
+### Fixed
+- Credit watermark clipped at the left edge for configs saved before v2.0.99:
+  the legacy `position_x` default (0.03, top-left anchor) is now migrated to
+  0.5 (true center) when the config loads, matching the center-anchored
+  positioning introduced in v2.0.99.
+
 ## [2.0.102] - 2026-10-17
 ### Fixed
 - `NameError: cache_key is not defined` in `_download_section_module`
