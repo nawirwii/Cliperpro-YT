@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [2.0.106] - 2026-10-20
+### Removed
+- Popup Announcement/Notification dihapus sepenuhnya (kontennya basi dari
+  server luar). Dialog update versi resmi tetap dipertahankan.
+
 ## [2.0.105] - 2026-10-19
 ### Fixed
 - GPU encoding now applies to hook text overlay and caption burning steps:
