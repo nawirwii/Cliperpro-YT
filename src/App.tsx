@@ -16,14 +16,11 @@ import { ClipDetailPage } from "@/pages/ClipDetailPage";
 import { ReplizSettingsPage } from "@/pages/ReplizSettingsPage";
 import { CreditsPage } from "@/pages/CreditsPage";
 import { UpdateDialog } from "@/components/UpdateDialog";
-import { NotificationDialog, notificationDismissed } from "@/components/NotificationDialog";
 import { checkForUpdate, type LatestVersionResponse } from "@/hooks/versionCheck";
-import { checkNotification, type NotificationResponse } from "@/hooks/notificationCheck";
 import { useAppStore } from "@/stores/appStore";
 
 function App() {
   const [update, setUpdate] = useState<LatestVersionResponse | null>(null);
-  const [notification, setNotification] = useState<NotificationResponse | null>(null);
   const setStoreUpdate = useAppStore((s) => s.setAvailableUpdate);
 
   useEffect(() => {
@@ -32,10 +29,6 @@ function App() {
         setUpdate(result);
         setStoreUpdate(result);
       }
-    });
-
-    checkNotification().then((result) => {
-      if (result && !notificationDismissed(result)) setNotification(result);
     });
   }, []);
 
@@ -58,10 +51,7 @@ function App() {
           <Route path="/clip" element={<ClipDetailPage />} />
         </Route>
       </Routes>
-      {notification && (
-        <NotificationDialog notification={notification} onClose={() => setNotification(null)} />
-      )}
-      {!notification && update && (
+      {update && (
         <UpdateDialog update={update} onClose={() => setUpdate(null)} />
       )}
       <Toaster position="bottom-right" richColors />
