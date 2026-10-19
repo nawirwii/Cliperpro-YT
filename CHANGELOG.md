@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.0.108] - 2026-10-20
+### Fixed
+- Subtitle downloads now retry transient YouTube TLS/SSL connection resets.
+- Removed the subtitle path's dependency on remote EJS components from GitHub.
+- Added stable YouTube player clients and explicit network timeouts.
+
 ## [2.0.107] - 2026-10-20
 ### Fixed
 - Prevented the download watchdog from aborting a healthy silent audio
