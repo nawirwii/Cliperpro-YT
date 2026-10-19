@@ -198,6 +198,25 @@ def download_subtitle_only(
                 "YouTube rejected access (HTTP 403). Your cookies may have expired. "
                 "Please export fresh cookies while logged into YouTube."
             )
+        if any(
+            marker in last_error
+            for marker in (
+                "Could not resolve host",
+                "Failed to connect",
+                "Connection refused",
+                "Temporary failure in name resolution",
+                "Network is unreachable",
+                "Connection timed out",
+                "curl: (6)",
+                "curl: (7)",
+                "curl: (28)",
+            )
+        ):
+            raise RuntimeError(
+                "Could not reach YouTube (network/DNS error). "
+                "Please check your internet connection — make sure youtube.com "
+                "opens in your browser — then try again."
+            )
         raise RuntimeError(f"Subtitle download failed: {last_error}")
 
     srt_path = temp_dir / f"source.{subtitle_language}.srt"
