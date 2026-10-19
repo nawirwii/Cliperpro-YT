@@ -22,7 +22,9 @@ def _base_ydl_opts(cookies_path: str, deno_path: str | None, ffmpeg_path: str | 
     }
     if deno_path and Path(deno_path).exists():
         opts["js_runtimes"] = {"deno": {"path": deno_path}}
-        opts["remote_components"] = ["ejs:github"]
+        opts["extractor_args"] = {
+            "youtube": {"player_client": ["visionos", "ios", "android", "tv_downgraded"], "player_skip": ["js"]},
+        }
     if ffmpeg_path and Path(ffmpeg_path).exists():
         opts["ffmpeg_location"] = str(Path(ffmpeg_path).parent)
     return opts
@@ -169,11 +171,17 @@ def download_subtitle_only(
         "quiet": True,
         "no_warnings": False,
         "cookiefile": str(cookies_path),
+        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_retries": 3,
     }
 
     if deno_path and Path(deno_path).exists():
         ydl_opts["js_runtimes"] = {"deno": {"path": deno_path}}
-        ydl_opts["remote_components"] = ["ejs:github"]
+        ydl_opts["extractor_args"] = {
+            "youtube": {"player_client": ["visionos", "ios", "android", "tv_downgraded"], "player_skip": ["js"]},
+        }
 
     if ffmpeg_path and Path(ffmpeg_path).exists():
         ydl_opts["ffmpeg_location"] = str(Path(ffmpeg_path).parent)
