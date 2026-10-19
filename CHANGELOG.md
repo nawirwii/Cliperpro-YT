@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [2.0.107] - 2026-10-20
+### Fixed
+- Prevented the download watchdog from aborting a healthy silent audio
+  download after the video stream completes.
+- Improved timeout diagnostics to distinguish extraction and download phases.
+
 ## [2.0.106] - 2026-10-20
 ### Removed
 - Popup Announcement/Notification dihapus sepenuhnya (kontennya basi dari
