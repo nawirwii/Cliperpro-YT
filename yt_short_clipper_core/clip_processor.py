@@ -114,25 +114,42 @@ def _resolve_gpu_config(gpu_config: dict[str, Any] | None, log: LogFn) -> dict[s
     backend saw ``encoder=None`` and silently encoded with libx264 (CPU). If
     enabled but missing an encoder, re-detect once at runtime so existing users
     get hardware encoding without re-toggling the setting.
+
+    The returned dict carries both key shapes: the current ``enabled`` /
+    ``encoder`` / ``preset`` shape used by portrait/split_screen, plus the
+    legacy ``available`` / ``name`` shape still expected by
+    ``build_video_enc_args`` (hook/caption burn steps) and video_processor's
+    cut encode. Without this, those steps silently fall back to CPU even
+    with GPU acceleration enabled.
     """
-    if not gpu_config or not gpu_config.get("enabled") or gpu_config.get("encoder"):
+    if not gpu_config or not gpu_config.get("enabled"):
         return gpu_config
-    try:
-        from .gpu import detect_gpu
-        det = detect_gpu()
-        enc = (det or {}).get("encoder") or {}
-        if enc.get("available") and enc.get("name"):
-            resolved = {
-                "enabled": True,
-                "encoder": enc["name"],
-                "preset": enc.get("preset"),
-            }
-            log(f"GPU config missing encoder — resolved: {enc['name']} (preset={enc.get('preset')})")
-            return resolved
-        log("GPU acceleration enabled but no encoder available — falling back to CPU")
-    except Exception as e:
-        log(f"GPU re-detect failed ({e}) — falling back to CPU")
-    return gpu_config
+    encoder = gpu_config.get("encoder")
+    if not encoder:
+        try:
+            from .gpu import detect_gpu
+            det = detect_gpu()
+            enc = (det or {}).get("encoder") or {}
+            if enc.get("available") and enc.get("name"):
+                encoder = enc["name"]
+                gpu_config = {
+                    "enabled": True,
+                    "encoder": encoder,
+                    "preset": enc.get("preset"),
+                }
+                log(f"GPU config missing encoder — resolved: {encoder} (preset={enc.get('preset')})")
+            else:
+                log("GPU acceleration enabled but no encoder available — falling back to CPU")
+                return gpu_config
+        except Exception as e:
+            log(f"GPU re-detect failed ({e}) — falling back to CPU")
+            return gpu_config
+    # Normalize: legacy consumers (hook/caption burn, cut encode) expect
+    # {"available": True, "name": <encoder>}.
+    normalized = dict(gpu_config)
+    normalized["available"] = True
+    normalized["name"] = normalized.get("name") or encoder
+    return normalized
 
 
 def _run_portrait(input_path: str, output_path: str, options: dict[str, Any], log: LogFn, gpu_config: dict[str, Any] | None = None) -> str:
