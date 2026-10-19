@@ -397,7 +397,13 @@ class _YTDlpLogger:
         # it doesn't fire during slow CDN connections (>90s on throttled
         # Indonesian links).
         if self._state is not None and (
-            "Downloading m3u8" in msg or "Downloading item" in msg
+            "Downloading m3u8" in msg
+            or "Downloading item" in msg
+            # yt-dlp emits a new Destination line when it starts the second
+            # stream (usually audio).  With aria2c, progress hooks can remain
+            # quiet while that stream is downloading, so this is an important
+            # phase/heartbeat boundary for the watchdog.
+            or "[download] Destination" in msg
         ):
             self._state["download_phase_active"] = True
             # The manifest/item fetch is real network activity, but yt-dlp
@@ -928,7 +934,13 @@ def _download_section_module(
     # nothing else would ever abort. Keep watching; abort only after this much
     # time with ZERO log/hook activity. Legit m3u8 fetches take 90-100s on
     # Indonesian throttled links, so 150s gives margin without hanging forever.
-    _DOWNLOAD_STALL_ABORT = 150
+    # External aria2c downloads do not reliably produce yt-dlp progress hooks
+    # for every stream.  In particular, after the video reaches 100%, the
+    # audio .m4a can download silently for several minutes on a throttled
+    # connection.  150s incorrectly aborts a healthy download and then
+    # misreports it as an extraction timeout. Keep a long last-resort guard;
+    # socket/fragment retries still handle genuinely dead connections.
+    _DOWNLOAD_STALL_ABORT = 600
     _abort = threading.Event()
 
     def _extraction_watchdog() -> None:
@@ -1009,9 +1021,11 @@ def _download_section_module(
                         f"{_SUSTAINED_THROTTLE_BPS // 1024} KiB/s — "
                         "retrying with a different YouTube client."
                     )
+                phase = "download" if download_state.get("download_phase_active") else "extraction"
+                timeout = _DOWNLOAD_STALL_ABORT if phase == "download" else _EXTRACT_ABORT
                 raise RuntimeError(
-                    f"Download ({label}) aborted: extraction timed out after "
-                    f"{_EXTRACT_ABORT}s with no activity. Check your network or try again."
+                    f"Download ({label}) aborted: {phase} timed out after "
+                    f"{timeout}s with no activity. Check your network or try again."
                 )
             dl_thread.join(timeout=5)
         # Surface the real failure instead of a downstream "file not found".
