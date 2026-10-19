@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [2.0.105] - 2026-10-19
+### Fixed
+- GPU encoding now applies to hook text overlay and caption burning steps:
+  `_resolve_gpu_config` normalizes the GPU config to include the legacy
+  `available`/`name` keys expected by `build_video_enc_args`, fixing the
+  silent fallback to CPU (libx264) even with GPU Acceleration enabled.
+
 ## [2.0.104] - 2026-10-18
 ### Fixed
 - Credit watermark position moved to (0.5, 0.3) — horizontally centered,
