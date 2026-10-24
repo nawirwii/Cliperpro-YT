@@ -45,6 +45,15 @@ _TIME_RANGE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Explicit clip-duration requests override the default short-form budget. Keep
+# this separate from clock ranges: "10:20 to 20:00" is a source window, while
+# "30-50 seconds" is the duration budget for each returned clip.
+_DURATION_RANGE_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(?:-|–|—|to|sampai|hingga)\s*"
+    r"(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s|detik)\b",
+    re.IGNORECASE,
+)
+
 # How far a returned segment may sit from the range the user asked for and still
 # count as "the one they asked for". Models snap to subtitle cue boundaries, so
 # an exact string match would almost never hold.
@@ -60,17 +69,22 @@ def _clock_to_seconds(value: str) -> float:
 
 
 def parse_requested_ranges(user_direction: str | None) -> list[tuple[float, float]]:
-    """Clock ranges the user spelled out, as (start, end) seconds pairs.
-
-    These are exempt from the 58-120s duration filter: the user asked for that
-    exact span, so a 50-second clip is the correct answer rather than a reject.
-    """
+    """Clock ranges the user spelled out, as (start, end) seconds pairs."""
     ranges: list[tuple[float, float]] = []
     for raw_start, raw_end in _TIME_RANGE_RE.findall(sanitize_direction(user_direction)):
         start, end = _clock_to_seconds(raw_start), _clock_to_seconds(raw_end)
         if end > start:
             ranges.append((start, end))
     return ranges
+
+
+def parse_requested_duration_range(user_direction: str | None) -> tuple[float, float] | None:
+    """Return an explicit per-clip duration range, if the direction provides one."""
+    matches = _DURATION_RANGE_RE.findall(sanitize_direction(user_direction))
+    if not matches:
+        return None
+    low, high = (float(value) for value in matches[-1])
+    return (low, high) if 0 < low <= high else None
 
 
 def _matches_requested_range(
@@ -313,7 +327,11 @@ def find_highlights(
 
     raw_highlights = parse_highlights_json(result, log)
     valid = _validate_highlights(
-        raw_highlights, num_clips, log, parse_requested_ranges(user_direction)
+        raw_highlights,
+        num_clips,
+        log,
+        parse_requested_ranges(user_direction),
+        parse_requested_duration_range(user_direction),
     )
     return valid, token_usage
 
@@ -381,9 +399,12 @@ def _validate_highlights(
     num_clips: int,
     log: LogFn,
     requested_ranges: list[tuple[float, float]] | None = None,
+    requested_duration: tuple[float, float] | None = None,
 ) -> list[dict[str, Any]]:
     valid: list[dict[str, Any]] = []
     requested_ranges = requested_ranges or []
+    min_duration, max_duration = requested_duration or (58.0, 120.0)
+    duration_label = f"{min_duration:g}-{max_duration:g}s"
 
     for h in highlights:
         if "reason" in h and "description" not in h:
@@ -407,12 +428,14 @@ def _validate_highlights(
             parse_timestamp(h["start_time"]), parse_timestamp(h["end_time"]), requested_ranges
         )
 
-        if 58 <= duration <= 120 or exact:
+        in_duration_range = min_duration <= duration <= max_duration
+        exact_range_exempt = exact and requested_duration is None
+        if in_duration_range or exact_range_exempt:
             valid.append(h)
-            note = " - exact range from your direction" if exact and not 58 <= duration <= 120 else ""
+            note = " - exact range from your direction" if exact_range_exempt and not in_duration_range else ""
             log(f"OK {title} ({duration:.0f}s) [score {h['virality_score']}/10]{note}")
         else:
-            log(f"Skip {title} ({duration:.0f}s) - outside 58-120s")
+            log(f"Skip {title} ({duration:.0f}s) - outside {duration_label}")
 
         if len(valid) >= num_clips:
             break

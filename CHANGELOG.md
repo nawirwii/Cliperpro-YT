@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [2.0.109] - 2026-10-24
+### Fixed
+- Respect explicit per-clip duration directions (for example, 30–50 seconds) during AI highlight validation instead of applying the default 58–120 second filter.
+- Report the active duration range in skipped-highlight logs.
+
 ## [2.0.108] - 2026-10-20
 ### Fixed
 - Subtitle downloads now retry transient YouTube TLS/SSL connection resets.
