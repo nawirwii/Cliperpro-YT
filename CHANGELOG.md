@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [2.0.111] - 2026-10-25
+### Fixed
+- Synchronized the in-app version label, Tauri metadata, and package version.
+- Rebuild release artifacts with the current AI duration validation and encoding fixes.
+
 ## [2.0.109] - 2026-10-24
 ### Fixed
 - Respect explicit per-clip duration directions (for example, 30–50 seconds) during AI highlight validation instead of applying the default 58–120 second filter.
