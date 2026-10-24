@@ -77,12 +77,14 @@ SEARCH THE WHOLE TRANSCRIPT:
 DURATION (CRITICAL)
 ===================
 
-* Every clip MUST run 60-120 seconds.
-* Aim for 85-95 seconds.
+* Every clip MUST run 58-120 seconds by default.
+* Aim for 75-95 seconds by default.
+* If the USER DIRECTION specifies a per-clip duration range such as
+  "30-50 detik" or "30-50 seconds", that range overrides this default.
 * Compute duration from the transcript timestamps. Never estimate it from how
   much text a segment contains.
 
-Shorter than 60 seconds -> extend it with context before or after.
+Shorter than the active minimum -> extend it with context before or after.
 Longer than 120 seconds -> trim the irrelevant edges without breaking the story.
 
 Copy timestamps from the transcript's own time markers. Do not invent times that
@@ -165,8 +167,8 @@ FINAL CHECK BEFORE YOU ANSWER
 =============================
 
 1. Exactly {num_clips} objects in the array.
-2. Every clip runs 60-120 seconds, measured from the timestamps you wrote —
-   unless a user direction asked for an exact range.
+2. Every clip runs within the active duration range, measured from the
+   timestamps you wrote. A user-specified duration range overrides 58-120.
 3. No two clips overlap, and they are not just consecutive chunks from the
    opening minutes.
 4. title, description and hook_text are in {output_language}.
@@ -195,7 +197,9 @@ How to follow it:
   2:50", or "dari 21:30 sampai 22:25"), use that range EXACTLY. Do not widen it,
   narrow it or shift it. The 60-120 second rule DOES NOT APPLY to that segment —
   the requested range wins, even at 50 seconds or over 2 minutes.
-* Segments the direction did NOT give a range for still must run 60-120 seconds.
+* A per-clip duration range such as "30-50 detik" applies to every returned
+  clip, not only to one clip. It overrides the default 58-120 second rule.
+* Segments the direction did NOT give a duration range for still must run 58-120 seconds.
 * When the direction rules something out ("skip the intro", "no sponsor read"),
   do not select that material at all.
 * If fewer moments match the direction than the number of clips requested, still

@@ -39,25 +39,25 @@ interface ScannedVideo {
 }
 
 const DIRECTION_PLACEHOLDER =
-  'e.g. Clip 1 from 21:30 to 22:25. Take every mention of "investment". Skip the intro and the sponsor read.';
+  'Contoh: ambil clip dari 10:20 sampai 20:00, durasi tiap clip 30–50 detik, pilih hook paling kuat, skip intro dan sponsor.';
 
 /** Tap-to-insert starters showing the kinds of steer the prompt understands. */
 const DIRECTION_EXAMPLES: { label: string; text: string }[] = [
   {
-    label: "Cut from a specific time",
-    text: "Only use the part between 5:10 and 12:00.",
+    label: "Rentang + durasi clip",
+    text: "Gunakan hanya bagian 10:20 sampai 20:00. Setiap clip wajib 30–50 detik dan jangan lebih dari 50 detik.",
   },
   {
-    label: "Every time a topic comes up",
-    text: "Take every moment where they talk about pricing.",
+    label: "Topik tertentu",
+    text: "Ambil setiap momen saat mereka membahas harga dan pilih yang paling mengejutkan.",
   },
   {
-    label: "One moment first, then the rest",
-    text: "There is a punchline during the roasting bit — clip that first, then fill the rest with the funniest moments.",
+    label: "Hook dan mini-story",
+    text: "Pilih hook terkuat, konflik, pernyataan mengejutkan, atau mini-story lengkap. Hindari jeda dan pengulangan.",
   },
   {
-    label: "Things to stay away from",
-    text: "Skip the intro and any sponsor read, and avoid heavy or sad topics.",
+    label: "Yang harus dihindari",
+    text: "Lewati intro, sponsor, jeda panjang, pengulangan, dan kalimat yang terpotong.",
   },
 ];
 

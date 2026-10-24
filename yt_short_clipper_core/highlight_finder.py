@@ -102,6 +102,17 @@ def sanitize_direction(user_direction: str | None) -> str:
     if not text:
         return ""
 
+    # Repair common UTF-8/CP1252 mojibake from older Windows UI builds.
+    # Otherwise "30–50" can arrive as "30â€“50" and miss duration parsing.
+    text = (
+        text.replace("â€“", "–")
+        .replace("â€”", "—")
+        .replace("â€™", "'")
+        .replace("â€œ", '"')
+        .replace("â€", '"')
+        .replace("Â", "")
+    )
+
     text = _PLACEHOLDER_RE.sub("", text)
     # Keep the text from closing its own delimiter and escaping the block.
     text = _DELIMITER_RE.sub("", text).strip()
