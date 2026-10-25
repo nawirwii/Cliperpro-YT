@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/jipraks/yt-short-clipper.git"
   },
-  "version": "2.0.111",
+  "version": "2.0.112",
   "type": "module",
   "scripts": {
     "dev": "vite",

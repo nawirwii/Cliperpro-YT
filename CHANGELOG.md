@@ -2,15 +2,10 @@
 
 ## [Unreleased]
 
-## [2.0.111] - 2026-10-25
+## [2.0.112] - 2026-10-25
 ### Fixed
-- Synchronized the in-app version label, Tauri metadata, and package version.
-- Rebuild release artifacts with the current AI duration validation and encoding fixes.
-
-## [2.0.109] - 2026-10-24
-### Fixed
-- Respect explicit per-clip duration directions (for example, 30–50 seconds) during AI highlight validation instead of applying the default 58–120 second filter.
-- Report the active duration range in skipped-highlight logs.
+- Credit watermark font size now stays synchronized between Settings preview and processed videos by scaling against the final video width.
+- Processing dialog now shows the active credit font size from Credit Watermark Settings.
 
 ## [2.0.108] - 2026-10-20
 ### Fixed

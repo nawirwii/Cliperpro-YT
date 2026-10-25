@@ -178,10 +178,16 @@ def apply_watermark(
         # fontfile is ALWAYS included (never rely on fontconfig defaults);
         # path is escaped for Windows drive letters and spaces.
         fontfile_part = f":fontfile={_escape_filter_path(font_path)}" if font_path else ""
+        # The settings preview is rendered at 270px wide (9:16), while the
+        # processed portrait video is normally 1080px wide.  ``font_size`` is
+        # therefore a preview-pixel value, not an absolute ffmpeg pixel value.
+        # Scale it with the actual output width so the saved setting and the
+        # preview stay visually consistent (and still work for other sizes).
+        fontsize_expr = f"({font_size}*main_w/270)"
         credit_filter = (
             f"{input_label}drawtext="
             f"text='{escaped_display}':"
-            f"fontsize={font_size}:"
+            f"fontsize={fontsize_expr}:"
             f"fontcolor=0x{ff_color}{alpha_hex}{fontfile_part}:"
             f"x=(main_w*{pos_x}-text_w/2):y=(main_h*{pos_y}-text_h/2):"
             f"box=1:boxcolor=black@0.5:boxborderw=5:"

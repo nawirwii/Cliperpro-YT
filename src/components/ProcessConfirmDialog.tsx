@@ -517,12 +517,17 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                 </div>
 
                 {addCreditWatermark && (
-                  <input
-                    value={creditText}
-                    onChange={(e) => setCreditText(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-[var(--color-bg-secondary)] rounded-[var(--radius-sm)] border border-[var(--color-border-light)] focus:outline-none focus:border-[var(--color-accent)]"
-                    placeholder="e.g. Source: {channel}"
-                  />
+                  <div className="space-y-1">
+                    <input
+                      value={creditText}
+                      onChange={(e) => setCreditText(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-[var(--color-bg-secondary)] rounded-[var(--radius-sm)] border border-[var(--color-border-light)] focus:outline-none focus:border-[var(--color-accent)]"
+                      placeholder="e.g. Source: {channel}"
+                    />
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      Size: <strong>{config.creditWatermark.fontSize}px</strong> from Credit Watermark Settings · scaled for final video
+                    </p>
+                  </div>
                 )}
 
               {/* Caption style selector (only if captions enabled) */}
