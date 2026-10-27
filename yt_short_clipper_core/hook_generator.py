@@ -41,6 +41,7 @@ HOOK_STYLE_PRESETS: dict[str, dict[str, Any]] = {
     "Highlight Marker": {"font_color": "#111111", "bg_color": "#FDE047", "corner_radius": 0},
     "Photo Story Hook": {"font_color": "#FFFFFF", "bg_color": "#2563EB", "corner_radius": 12, "font_size": 0.052},
     "AI Future Poster": {"font_color": "#111111", "bg_color": "#FFD21F", "corner_radius": 0, "font_size": 0.06, "brush": True, "shadow": True},
+    "Quote Split Screen": {"font_color": "#FFFFFF", "bg_color": "#000000", "corner_radius": 0, "font_size": 0.052, "outline": True, "outline_width": 8, "position_y": 0.48},
 }
 
 
@@ -212,6 +213,9 @@ def generate_hook(
             brush = [box_x1 - 10, box_y1 + 4, box_x2 + 10, box_y2 - 2]
             draw.polygon([(brush[0], brush[1] + 6), (brush[0] + 18, brush[1]), (brush[2] - 14, brush[1] + 3), (brush[2], brush[1] + 12), (brush[2] - 12, brush[3]), (brush[0] + 8, brush[3] - 4)], fill=(0, 0, 0, 230))
             draw.polygon([(v + (4 if i % 2 == 0 else 3)) for i, v in enumerate(brush)], fill=(*bg_color_rgb, 255))
+        elif style.get("outline"):
+            # Transparent editorial quote: preserve the speaker behind text.
+            pass
         elif corner_radius > 0 and hasattr(draw, "rounded_rectangle"):
             r = min(corner_radius, box_w // 2, box_h // 2)
             draw.rounded_rectangle(
@@ -234,6 +238,8 @@ def generate_hook(
             m["text"],
             font=pil_font,
             fill=(*font_color_rgb, 255),
+            stroke_width=int(style.get("outline_width", 0)),
+            stroke_fill=(0, 0, 0, 255) if style.get("outline") else None,
         )
 
         cur_y = box_y2 + line_spacing

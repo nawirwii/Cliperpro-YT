@@ -86,14 +86,14 @@ export const CAPTION_STYLES = [
 
 export const HOOK_STYLES = [
   "Bold Yellow Brush", "Viral Creator", "Clean White Box", "Pop Comic", "Minimal Kinetic",
-  "Red Alert", "Neon Digital", "Cinematic Title", "Highlight Marker", "Photo Story Hook", "AI Future Poster",
+  "Red Alert", "Neon Digital", "Cinematic Title", "Highlight Marker", "Photo Story Hook", "AI Future Poster", "Quote Split Screen",
 ];
 
 const STYLE_SWATCHES: Record<string, string> = {
   "Bold Yellow Brush": "#FFD93D", "Viral Creator": "#FF6B6B", "Clean White Box": "#FFFFFF",
   "Pop Comic": "#B8F2E6", "Minimal Kinetic": "#111827", "Red Alert": "#EF4444",
   "Neon Digital": "#A3FF12", "Cinematic Title": "#D4AF37", "Highlight Marker": "#FDE047",
-  "Photo Story Hook": "#60A5FA", "AI Future Poster": "#FFD21F", "Creator Pop": "#55FFFF", "Kinetic White": "#FFFFFF",
+  "Photo Story Hook": "#60A5FA", "AI Future Poster": "#FFD21F", "Quote Split Screen": "#FFFFFF", "Creator Pop": "#55FFFF", "Kinetic White": "#FFFFFF",
   "Midnight Neon": "#FF66FF", "Editorial Mono": "#D6FF5C", "Punchy Red": "#FF6600",
   "Soft Mint": "#B6FFAA", "Karaoke Gold": "#FFD700", "Comic Burst": "#FF6B6B",
   "Minimal Center": "#E5E7EB", "News Alert": "#EF4444",
