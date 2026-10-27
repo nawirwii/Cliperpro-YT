@@ -40,6 +40,7 @@ HOOK_STYLE_PRESETS: dict[str, dict[str, Any]] = {
     "Cinematic Title": {"font_color": "#FFFFFF", "bg_color": "#111111", "corner_radius": 0, "font_size": 0.048, "position_y": 0.72},
     "Highlight Marker": {"font_color": "#111111", "bg_color": "#FDE047", "corner_radius": 0},
     "Photo Story Hook": {"font_color": "#FFFFFF", "bg_color": "#2563EB", "corner_radius": 12, "font_size": 0.052},
+    "AI Future Poster": {"font_color": "#111111", "bg_color": "#FFD21F", "corner_radius": 0, "font_size": 0.06, "brush": True, "shadow": True},
 }
 
 
@@ -207,7 +208,11 @@ def generate_hook(
         box_x2 = box_x1 + box_w
         box_y2 = box_y1 + box_h
 
-        if corner_radius > 0 and hasattr(draw, "rounded_rectangle"):
+        if style.get("brush"):
+            brush = [box_x1 - 10, box_y1 + 4, box_x2 + 10, box_y2 - 2]
+            draw.polygon([(brush[0], brush[1] + 6), (brush[0] + 18, brush[1]), (brush[2] - 14, brush[1] + 3), (brush[2], brush[1] + 12), (brush[2] - 12, brush[3]), (brush[0] + 8, brush[3] - 4)], fill=(0, 0, 0, 230))
+            draw.polygon([(v + (4 if i % 2 == 0 else 3)) for i, v in enumerate(brush)], fill=(*bg_color_rgb, 255))
+        elif corner_radius > 0 and hasattr(draw, "rounded_rectangle"):
             r = min(corner_radius, box_w // 2, box_h // 2)
             draw.rounded_rectangle(
                 [box_x1, box_y1, box_x2, box_y2],
@@ -222,6 +227,8 @@ def generate_hook(
 
         text_x = box_x1 + padding - m["bbox"][0]
         text_y = box_y1 + padding - m["bbox"][1]
+        if style.get("shadow"):
+            draw.text((text_x + 8, text_y + 8), m["text"], font=pil_font, fill=(0, 0, 0, 240), stroke_width=4, stroke_fill=(0, 0, 0, 240))
         draw.text(
             (text_x, text_y),
             m["text"],
