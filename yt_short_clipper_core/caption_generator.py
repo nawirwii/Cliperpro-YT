@@ -25,38 +25,54 @@ def _format_ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{centisecs:02d}"
 
 
-def _create_ass_subtitle(transcript: SimpleNamespace, output_path: str, time_offset: float = 0, style_name: str = "Modern Yellow") -> None:
+def _create_ass_subtitle(transcript: SimpleNamespace, output_path: str, time_offset: float = 0, style_name: str = "Creator Pop") -> None:
     """Create ASS subtitle file with CapCut-style word-by-word highlighting."""
 
-    # Define 6 styles
+    # Modern creator-style presets. Names are shared with the React selector.
     styles = {
-        "Modern Yellow": {
-            "font": "Arial Black", "size": 65, "color": "&H00FFFFFF", "outline": "&H00000000", 
-            "highlight": "&H00FFFF", "border": 4, "shadow": 2
+        "Creator Pop": {
+            "font": "Montserrat ExtraBold", "size": 68, "color": "&H00FFFFFF", "outline": "&H00101010",
+            "highlight": "&H0055FFFF", "border": 3, "shadow": 2
         },
-        "Neon Green": {
-            "font": "Arial Black", "size": 65, "color": "&H00FFFFFF", "outline": "&H00000000", 
-            "highlight": "&H00FF00", "border": 4, "shadow": 2
+        "Kinetic White": {
+            "font": "Inter Bold", "size": 65, "color": "&H00FFFFFF", "outline": "&H00181818",
+            "highlight": "&H00A5FF", "border": 3, "shadow": 3
         },
-        "Boxed White": {
-            "font": "Arial Black", "size": 65, "color": "&H00000000", "outline": "&H00FFFFFF", 
-            "highlight": "&H000000", "border": 0, "shadow": 0, "bg_box": True
+        "Midnight Neon": {
+            "font": "Poppins SemiBold", "size": 64, "color": "&H00FFFFFF", "outline": "&H00402020",
+            "highlight": "&H00FF66FF", "border": 3, "shadow": 4
         },
-        "Impact Shadow": {
-            "font": "Impact", "size": 75, "color": "&H00FFFFFF", "outline": "&H00000000", 
-            "highlight": "&H3B82F6", "border": 0, "shadow": 4
+        "Editorial Mono": {
+            "font": "DejaVu Sans Mono", "size": 58, "color": "&H00FFFFFF", "outline": "&H00101010",
+            "highlight": "&H00D6FF5C", "border": 2, "shadow": 1
         },
-        "Gold Outline": {
-            "font": "Arial Black", "size": 70, "color": "&H00FFFFFF", "outline": "&H0000FFFF", 
-            "highlight": "&H00FFFF", "border": 3, "shadow": 1
+        "Punchy Red": {
+            "font": "Arial Black", "size": 72, "color": "&H00FFFFFF", "outline": "&H00151515",
+            "highlight": "&H000066FF", "border": 4, "shadow": 3
         },
-        "Pink Outline": {
-            "font": "Arial Black", "size": 60, "color": "&H00FFFFFF", "outline": "&H00FF00FF", 
-            "highlight": "&H00FFFF", "border": 4, "shadow": 2
+        "Soft Mint": {
+            "font": "Nunito ExtraBold", "size": 66, "color": "&H00FFFFFF", "outline": "&H00403820",
+            "highlight": "&H00B6FFAA", "border": 3, "shadow": 2
+        },
+        "Karaoke Gold": {
+            "font": "Arial Black", "size": 66, "color": "&H00FFFFFF", "outline": "&H00101010",
+            "highlight": "&H0000D7FF", "border": 3, "shadow": 2
+        },
+        "Comic Burst": {
+            "font": "DejaVu Sans Bold", "size": 70, "color": "&H00FFFFFF", "outline": "&H00000080",
+            "highlight": "&H006B6BFF", "border": 4, "shadow": 3
+        },
+        "Minimal Center": {
+            "font": "DejaVu Sans", "size": 56, "color": "&H00FFFFFF", "outline": "&H00202020",
+            "highlight": "&H00FFFFFF", "border": 2, "shadow": 1
+        },
+        "News Alert": {
+            "font": "Arial", "size": 62, "color": "&H00FFFFFF", "outline": "&H000000CC",
+            "highlight": "&H000000FF", "border": 3, "shadow": 2
         }
     }
 
-    s = styles.get(style_name, styles["Modern Yellow"])
+    s = styles.get(style_name, styles["Creator Pop"])
     highlight_color = s["highlight"]
     
     border_style = 3 if s.get("bg_box") else 1 # 3 = Opaque box
@@ -126,7 +142,7 @@ def generate_captions_from_words(
     input_video_path: str,
     output_path: str,
     words: list[dict[str, Any]],
-    caption_style: str = "Modern Yellow",
+    caption_style: str = "Creator Pop",
     log: LogFn | None = None,
     gpu_config: dict[str, Any] | None = None,
 ) -> str:

@@ -27,6 +27,7 @@ export interface ProcessOptions {
   addCreditWatermark: boolean;
   creditText?: string;
   captionStyle?: string;
+  hookStyle?: string;
   reframeMode: ReframeMode;
   centeredBackground: CenteredBackground;
   /** Source resolution cap for the download — 720p by default (smaller file). */
@@ -65,6 +66,7 @@ export async function processClips(params: {
       position_x: number;
       position_y: number;
       duration_seconds: number;
+      style_name?: string;
     };
     watermark?: {
       image_path: string;

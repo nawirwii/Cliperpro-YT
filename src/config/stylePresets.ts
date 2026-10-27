@@ -15,6 +15,7 @@ export interface StylePresetOptions {
   addWatermark: boolean;
   addCreditWatermark: boolean;
   captionStyle: string;
+  hookStyle?: string;
   reframeMode: ReframeMode;
   centeredBackground: CenteredBackground;
   downloadQuality: DownloadQuality;
@@ -40,7 +41,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       addHook: true,
       addWatermark: true,
       addCreditWatermark: true,
-      captionStyle: "Boxed White",
+      captionStyle: "Editorial Mono",
       reframeMode: "face",
       centeredBackground: "black",
       downloadQuality: "720p",
@@ -55,7 +56,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       addHook: true,
       addWatermark: true,
       addCreditWatermark: true,
-      captionStyle: "Neon Green",
+      captionStyle: "Midnight Neon",
       reframeMode: "centered",
       centeredBackground: "blurred",
       downloadQuality: "720p",
@@ -70,7 +71,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       addHook: true,
       addWatermark: true,
       addCreditWatermark: true,
-      captionStyle: "Gold Outline",
+      captionStyle: "Soft Mint",
       reframeMode: "face",
       centeredBackground: "black",
       downloadQuality: "720p",

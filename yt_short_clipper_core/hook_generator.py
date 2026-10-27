@@ -29,6 +29,19 @@ DEFAULT_HOOK_STYLE = {
 
 DEFAULT_HOOK_DURATION = 5.0
 
+HOOK_STYLE_PRESETS: dict[str, dict[str, Any]] = {
+    "Bold Yellow Brush": {"font_color": "#111111", "bg_color": "#FFD93D", "corner_radius": 0, "font_size": 0.058},
+    "Viral Creator": {"font_color": "#FFFFFF", "bg_color": "#FF6B6B", "corner_radius": 18, "font_size": 0.056},
+    "Clean White Box": {"font_color": "#111111", "bg_color": "#FFFFFF", "corner_radius": 8},
+    "Pop Comic": {"font_color": "#111111", "bg_color": "#B8F2E6", "corner_radius": 24, "font_size": 0.06},
+    "Minimal Kinetic": {"font_color": "#FFFFFF", "bg_color": "#111111", "corner_radius": 0, "font_size": 0.05},
+    "Red Alert": {"font_color": "#FFFFFF", "bg_color": "#EF4444", "corner_radius": 4, "font_size": 0.06},
+    "Neon Digital": {"font_color": "#111111", "bg_color": "#A3FF12", "corner_radius": 2},
+    "Cinematic Title": {"font_color": "#FFFFFF", "bg_color": "#111111", "corner_radius": 0, "font_size": 0.048, "position_y": 0.72},
+    "Highlight Marker": {"font_color": "#111111", "bg_color": "#FDE047", "corner_radius": 0},
+    "Photo Story Hook": {"font_color": "#FFFFFF", "bg_color": "#2563EB", "corner_radius": 12, "font_size": 0.052},
+}
+
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     """Convert hex color string to RGB tuple."""
@@ -80,7 +93,10 @@ def generate_hook(
     Returns the output path.
     """
     log = log or (lambda m: None)
+    style_name = (hook_style or {}).get("style_name", "")
     style = {**DEFAULT_HOOK_STYLE, **(hook_style or {})}
+    if style_name in HOOK_STYLE_PRESETS:
+        style.update(HOOK_STYLE_PRESETS[style_name])
     ffmpeg_path = get_ffmpeg_path()
     temp_dir = Path(output_path).parent
 

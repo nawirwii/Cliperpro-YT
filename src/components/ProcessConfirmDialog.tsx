@@ -78,7 +78,33 @@ interface ProcessConfirmDialogProps {
   onCancel: () => void;
 }
 
-export const CAPTION_STYLES = ["Modern Yellow", "Neon Green", "Boxed White", "Impact Shadow", "Gold Outline", "Pink Outline"];
+/** Caption presets intentionally mirror the renderer's supported style names. */
+export const CAPTION_STYLES = [
+  "Creator Pop", "Kinetic White", "Midnight Neon", "Editorial Mono", "Punchy Red",
+  "Soft Mint", "Karaoke Gold", "Comic Burst", "Minimal Center", "News Alert",
+];
+
+export const HOOK_STYLES = [
+  "Bold Yellow Brush", "Viral Creator", "Clean White Box", "Pop Comic", "Minimal Kinetic",
+  "Red Alert", "Neon Digital", "Cinematic Title", "Highlight Marker", "Photo Story Hook",
+];
+
+const STYLE_SWATCHES: Record<string, string> = {
+  "Bold Yellow Brush": "#FFD93D", "Viral Creator": "#FF6B6B", "Clean White Box": "#FFFFFF",
+  "Pop Comic": "#B8F2E6", "Minimal Kinetic": "#111827", "Red Alert": "#EF4444",
+  "Neon Digital": "#A3FF12", "Cinematic Title": "#D4AF37", "Highlight Marker": "#FDE047",
+  "Photo Story Hook": "#60A5FA", "Creator Pop": "#55FFFF", "Kinetic White": "#FFFFFF",
+  "Midnight Neon": "#FF66FF", "Editorial Mono": "#D6FF5C", "Punchy Red": "#FF6600",
+  "Soft Mint": "#B6FFAA", "Karaoke Gold": "#FFD700", "Comic Burst": "#FF6B6B",
+  "Minimal Center": "#E5E7EB", "News Alert": "#EF4444",
+};
+
+function StyleChoice({ name, selected, onClick }: { name: string; selected: boolean; onClick: () => void }) {
+  return <button type="button" onClick={onClick} aria-pressed={selected}
+    className={`flex items-center gap-2 px-2 py-2 rounded-[var(--radius-sm)] border text-[10px] font-medium text-left transition-colors ${selected ? "border-[var(--color-accent)] bg-[var(--color-bg-primary)] text-[var(--color-accent)]" : "border-transparent bg-[var(--color-bg-primary)] text-[var(--color-text-muted)] hover:border-[var(--color-border-light)]"}`}>
+    <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: STYLE_SWATCHES[name] ?? "#888" }} />{name}
+  </button>;
+}
 
 const PRESET_ICONS: Record<string, LucideIcon> = {
   podcast: Mic,
@@ -95,7 +121,8 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   const [addCreditWatermark, setAddCreditWatermark] = useState(config.creditWatermark.enabled);
   const [creditText, setCreditText] = useState(config.creditWatermark.text);
   const [reframeMode, setReframeMode] = useState<ReframeMode>("face");
-  const [captionStyle, setCaptionStyle] = useState("Modern Yellow");
+  const [captionStyle, setCaptionStyle] = useState("Creator Pop");
+  const [hookStyle, setHookStyle] = useState("Bold Yellow Brush");
   const [centeredBackground, setCenteredBackground] = useState<CenteredBackground>("black");
   const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>("720p");
   const [splitEnabled, setSplitEnabled] = useState(false);
@@ -131,6 +158,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     setAddWatermark(o.addWatermark);
     setAddCreditWatermark(o.addCreditWatermark);
     setCaptionStyle(o.captionStyle);
+    setHookStyle(o.hookStyle || "Bold Yellow Brush");
     setReframeMode(o.reframeMode);
     setCenteredBackground(o.centeredBackground);
     setDownloadQuality(o.downloadQuality);
@@ -174,6 +202,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       addCreditWatermark,
       creditText: addCreditWatermark ? creditText : undefined,
       captionStyle,
+      hookStyle,
       reframeMode,
       centeredBackground,
       downloadQuality,
@@ -530,28 +559,16 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                   </div>
                 )}
 
-              {/* Caption style selector (only if captions enabled) */}
+              {addHook && (
+                <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-bg-secondary)] space-y-3">
+                  <div className="flex items-center gap-2"><Quote className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Hook Visual Style</p></div>
+                  <div className="grid grid-cols-2 gap-1.5">{HOOK_STYLES.map((s) => <StyleChoice key={s} name={s} selected={hookStyle === s} onClick={() => { setHookStyle(s); setActivePreset(null); }} />)}</div>
+                </div>
+              )}
               {addCaptions && (
                 <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-bg-secondary)] space-y-3">
-                  <div className="flex items-center gap-2">
-                    <ImageIcon className="w-4 h-4 text-[var(--color-accent)] shrink-0" />
-                    <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Caption Style</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {CAPTION_STYLES.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => { setCaptionStyle(s); setActivePreset(null); }}
-                        className={`px-2 py-1.5 rounded-[var(--radius-sm)] border text-[10px] font-medium transition-colors ${
-                          captionStyle === s
-                            ? "border-[var(--color-accent)] bg-[var(--color-bg-primary)] text-[var(--color-accent)]"
-                            : "border-transparent bg-[var(--color-bg-primary)] text-[var(--color-text-muted)] hover:border-[var(--color-border-light)]"
-                        }`}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
+                  <div className="flex items-center gap-2"><ImageIcon className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Caption Style</p></div>
+                  <div className="grid grid-cols-2 gap-1.5">{CAPTION_STYLES.map((s) => <StyleChoice key={s} name={s} selected={captionStyle === s} onClick={() => { setCaptionStyle(s); setActivePreset(null); }} />)}</div>
                 </div>
               )}
             </div>
