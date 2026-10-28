@@ -122,7 +122,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   const [creditText, setCreditText] = useState(config.creditWatermark.text);
   const [reframeMode, setReframeMode] = useState<ReframeMode>("face");
   const [captionStyle, setCaptionStyle] = useState("Creator Pop");
-  const [hookStyle, setHookStyle] = useState("Bold Yellow Brush");
+  const [hookStyle, setHookStyle] = useState("Quote Split Screen");
   const [centeredBackground, setCenteredBackground] = useState<CenteredBackground>("black");
   const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>("720p");
   const [splitEnabled, setSplitEnabled] = useState(false);
@@ -158,7 +158,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     setAddWatermark(o.addWatermark);
     setAddCreditWatermark(o.addCreditWatermark);
     setCaptionStyle(o.captionStyle);
-    setHookStyle(o.hookStyle || "Bold Yellow Brush");
+    setHookStyle(o.hookStyle || "Quote Split Screen");
     setReframeMode(o.reframeMode);
     setCenteredBackground(o.centeredBackground);
     setDownloadQuality(o.downloadQuality);
