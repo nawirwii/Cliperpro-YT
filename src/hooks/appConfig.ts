@@ -97,10 +97,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     enabled: false,
     text: "Source: {channel}",
     color: "#FFFFFF",
-    fontSize: 24,
+    fontSize: 20,
     opacity: 0.7,
     positionX: 0.5,
-    positionY: 0.3,
+    positionY: 0.72,
   },
   hookStyle: {
     fontName: "Arial",
@@ -217,13 +217,17 @@ function mergeConfig(config: Partial<AppConfig> | undefined): AppConfig {
       // CENTER of the text.
       // - legacy default x=0.03 as a center point pushes the text off the
       //   left edge of the frame → reset to 0.5.
-      // - legacy default y=0.72 sat too low; the intended spot is the upper
-      //   third of the frame (y=0.3) → migrate untouched old defaults there.
+      // - old default y=0.72 was previously migrated to y=0.3. The credit
+      //   now intentionally belongs in the lower-third area requested by the
+      //   user, so migrate that old upper-third default back down.
       if (cw.positionX === 0.03 && cw.positionY === 0.72) {
         cw.positionX = 0.5;
-        cw.positionY = 0.3;
+        cw.positionY = 0.72;
       } else if (cw.positionX === 0.03) {
         cw.positionX = 0.5;
+      }
+      if (cw.positionX === 0.5 && cw.positionY === 0.3) {
+        cw.positionY = 0.72;
       }
       return cw;
     })(),
