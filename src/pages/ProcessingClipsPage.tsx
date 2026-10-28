@@ -110,7 +110,7 @@ export function ProcessingClipsPage() {
             position_x: hookStyle.positionX,
             position_y: hookStyle.positionY,
             duration_seconds: hookStyle.durationSeconds,
-            style_name: options.hookStyle || "Quote Split Screen",
+            style_name: options.hookStyle || "AI Future Poster",
           },
           watermark: {
             image_path: watermarkConfig.imagePath,

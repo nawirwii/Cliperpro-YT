@@ -604,8 +604,8 @@ fn default_app_config() -> serde_json::Value {
             "color": "#FFFFFF",
             "fontSize": 24,
             "opacity": 0.7,
-            "positionX": 0.03,
-            "positionY": 0.72
+            "positionX": 0.5,
+            "positionY": 0.3
         },
         "repliz": {
             "accessKey": "",

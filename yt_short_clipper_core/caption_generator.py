@@ -115,7 +115,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     word_text = w.word.strip().upper()
                     if k == j:
                         # Highlight for current word
-                        text_parts.append(f"{{\\c{highlight_color}&}}{word_text}{{\\c{s['color']}&}}")
+                        # CapCut-like pop: highlight the active word and briefly
+                        # scale it up before settling back to normal size.
+                        text_parts.append(
+                            f"{{\\c{highlight_color}&\\fscx112\\fscy112\\t(0,120,\\fscx100\\fscy100)}}"
+                            f"{word_text}{{\\c{s['color']}&}}"
+                        )
                     else:
                         text_parts.append(word_text)
 

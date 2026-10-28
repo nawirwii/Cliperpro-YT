@@ -41,7 +41,7 @@ HOOK_STYLE_PRESETS: dict[str, dict[str, Any]] = {
     "Highlight Marker": {"font_color": "#111111", "bg_color": "#FDE047", "corner_radius": 0},
     "Photo Story Hook": {"font_color": "#FFFFFF", "bg_color": "#2563EB", "corner_radius": 12, "font_size": 0.052},
     "AI Future Poster": {"font_color": "#111111", "bg_color": "#FFD21F", "corner_radius": 0, "font_size": 0.06, "brush": True, "shadow": True},
-    "Quote Split Screen": {"font_color": "#FFFFFF", "bg_color": "#000000", "corner_radius": 0, "font_size": 0.052, "outline": True, "outline_width": 8, "position_y": 0.48},
+
 }
 
 
@@ -196,50 +196,11 @@ def generate_hook(
     center_y = int(pos_y * height)
     block_top = center_y - total_h // 2
 
-    # Compose overlay image. Quote Split Screen is a real editorial layout:
-    # the source video remains visible above an opaque lower quote panel, with
-    # a high-contrast divider separating the two regions.
+    # Compose the hook overlay as a single readable title card.
     overlay_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay_img)
-    is_quote_split = style_name == "Quote Split Screen"
-    if is_quote_split:
-        panel_top = int(height * 0.62)
-        divider_h = max(6, int(height * 0.006))
-        draw.rectangle([0, panel_top, width, height], fill=(12, 12, 14, 248))
-        draw.rectangle([0, panel_top, width, panel_top + divider_h], fill=(255, 211, 31, 255))
-        panel_padding = max(32, int(width * 0.08))
-        quote_font_px = max(26, int(width * 0.055))
-        try:
-            quote_font = ImageFont.truetype(user_font_path or _find_system_font_bold(), quote_font_px)
-        except Exception:
-            quote_font = pil_font
-        quote_lines = []
-        current = []
-        max_quote_width = width - panel_padding * 2
-        for word in hook_upper.split():
-            candidate = " ".join(current + [word])
-            bbox = draw.textbbox((0, 0), candidate, font=quote_font, stroke_width=2)
-            if current and bbox[2] > max_quote_width:
-                quote_lines.append(" ".join(current))
-                current = [word]
-            else:
-                current.append(word)
-        if current:
-            quote_lines.append(" ".join(current))
-        quote_spacing = max(10, int(quote_font_px * 0.22))
-        quote_heights = [draw.textbbox((0, 0), line, font=quote_font, stroke_width=2)[3] for line in quote_lines]
-        quote_total = sum(quote_heights) + quote_spacing * max(0, len(quote_lines) - 1)
-        quote_y = panel_top + divider_h + max(24, (height - panel_top - divider_h - quote_total) // 2)
-        for line, line_h in zip(quote_lines, quote_heights):
-            bbox = draw.textbbox((0, 0), line, font=quote_font, stroke_width=2)
-            text_x = (width - (bbox[2] - bbox[0])) // 2
-            draw.text((text_x + 3, quote_y + 3), line, font=quote_font, fill=(0, 0, 0, 255), stroke_width=3, stroke_fill=(0, 0, 0, 255))
-            draw.text((text_x, quote_y), line, font=quote_font, fill=(255, 255, 255, 255), stroke_width=2, stroke_fill=(0, 0, 0, 255))
-            quote_y += line_h + quote_spacing
-    cur_y = block_top
+    # Normal title-card layout.
     for m in line_metrics:
-        if is_quote_split:
-            break
         box_w = m["box_w"]
         box_h = m["box_h"]
         box_x1 = center_x - box_w // 2

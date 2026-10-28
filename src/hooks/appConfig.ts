@@ -100,7 +100,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     fontSize: 20,
     opacity: 0.7,
     positionX: 0.5,
-    positionY: 0.72,
+    positionY: 0.3,
   },
   hookStyle: {
     fontName: "Arial",
@@ -222,13 +222,11 @@ function mergeConfig(config: Partial<AppConfig> | undefined): AppConfig {
       //   user, so migrate that old upper-third default back down.
       if (cw.positionX === 0.03 && cw.positionY === 0.72) {
         cw.positionX = 0.5;
-        cw.positionY = 0.72;
+        cw.positionY = 0.3;
       } else if (cw.positionX === 0.03) {
         cw.positionX = 0.5;
       }
-      if (cw.positionX === 0.5 && cw.positionY === 0.3) {
-        cw.positionY = 0.72;
-      }
+
       return cw;
     })(),
     hookStyle: {
