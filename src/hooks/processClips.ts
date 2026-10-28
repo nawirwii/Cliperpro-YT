@@ -27,6 +27,7 @@ export interface ProcessOptions {
   addCreditWatermark: boolean;
   creditText?: string;
   captionStyle?: string;
+
   hookStyle?: string;
   reframeMode: ReframeMode;
   centeredBackground: CenteredBackground;

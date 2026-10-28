@@ -35,6 +35,7 @@ def download_caption_words(
     temp_dir: str | Path,
     cookies_path: str,
     log: LogFn | None = None,
+    language: str = "auto",
 ) -> str | None:
     """Download the original-language auto-caption track as json3 and parse it.
 
@@ -71,12 +72,27 @@ def download_caption_words(
         log(f"Caption probe failed: {str(e)[:200]} — captions will be skipped")
         return None
 
-    orig_code = find_orig_caption_code((info or {}).get("automatic_captions"))
+    automatic_captions = (info or {}).get("automatic_captions") or {}
+    orig_code = find_orig_caption_code(automatic_captions)
     if not orig_code:
         log("No original-language subtitle track — captions will be skipped")
         return None
 
-    log(f"Original caption track: {orig_code} (downloading word-level timing)...")
+    requested_language = (language or "auto").strip().lower()
+    caption_code = orig_code
+    if requested_language == "en":
+        # Prefer YouTube's English translated track when available. Fall back
+        # to the original track rather than failing caption generation.
+        caption_code = next(
+            (code for code in automatic_captions if code == "en" or code.startswith("en-")),
+            orig_code,
+        )
+        if caption_code != orig_code:
+            log(f"English caption track selected: {caption_code}")
+    log(f"Caption track: {caption_code} (downloading word-level timing)...")
+
+    # The rest of the downloader expects a concrete language code.
+    orig_code = caption_code
 
     # Step 2: download just that track in json3.
     dl_opts = _base_ydl_opts(cookies_path, deno_path, ffmpeg_path)

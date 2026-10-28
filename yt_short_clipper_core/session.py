@@ -147,6 +147,7 @@ def find_highlights_only(
             temp_dir=session_dir,
             cookies_path=cookies_path,
             log=log,
+            language=(output_language or "auto"),
         )
     except Exception as e:
         log(f"Caption word-timing unavailable: {str(e)[:200]}")

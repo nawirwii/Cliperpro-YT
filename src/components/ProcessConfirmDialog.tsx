@@ -122,6 +122,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   const [creditText, setCreditText] = useState(config.creditWatermark.text);
   const [reframeMode, setReframeMode] = useState<ReframeMode>("face");
   const [captionStyle, setCaptionStyle] = useState("Creator Pop");
+
   const [hookStyle, setHookStyle] = useState("Clean White Box");
   const [centeredBackground, setCenteredBackground] = useState<CenteredBackground>("black");
   const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>("720p");
@@ -202,6 +203,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       addCreditWatermark,
       creditText: addCreditWatermark ? creditText : undefined,
       captionStyle,
+
       hookStyle,
       reframeMode,
       centeredBackground,
@@ -569,6 +571,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                 <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-bg-secondary)] space-y-3">
                   <div className="flex items-center gap-2"><ImageIcon className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Caption Style</p></div>
                   <div className="grid grid-cols-2 gap-1.5">{CAPTION_STYLES.map((s) => <StyleChoice key={s} name={s} selected={captionStyle === s} onClick={() => { setCaptionStyle(s); setActivePreset(null); }} />)}</div>
+
                 </div>
               )}
             </div>

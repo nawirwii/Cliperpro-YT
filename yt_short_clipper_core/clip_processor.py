@@ -196,6 +196,7 @@ def process_selected_highlights(
     add_credit_watermark = options.get("addCreditWatermark", False)
     caption_style = options.get("captionStyle", "Creator Pop")
 
+
     # Split screen mode: stack a local video (webcam) under the main video.
     split_screen = options.get("splitScreen") or {}
     split_enabled = bool(split_screen.get("enabled")) and bool(split_screen.get("webcamPath"))
