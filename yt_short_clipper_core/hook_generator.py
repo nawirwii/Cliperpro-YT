@@ -200,6 +200,7 @@ def generate_hook(
     overlay_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay_img)
     # Normal title-card layout.
+    cur_y = block_top
     for m in line_metrics:
         box_w = m["box_w"]
         box_h = m["box_h"]
