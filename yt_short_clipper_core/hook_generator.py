@@ -40,7 +40,6 @@ HOOK_STYLE_PRESETS: dict[str, dict[str, Any]] = {
     "Cinematic Title": {"font_color": "#FFFFFF", "bg_color": "#111111", "corner_radius": 0, "font_size": 0.048, "position_y": 0.72},
     "Highlight Marker": {"font_color": "#111111", "bg_color": "#FDE047", "corner_radius": 0},
     "Photo Story Hook": {"font_color": "#FFFFFF", "bg_color": "#2563EB", "corner_radius": 12, "font_size": 0.052},
-    "AI Future Poster": {"font_color": "#111111", "bg_color": "#FFD21F", "corner_radius": 0, "font_size": 0.06, "brush": True, "shadow": True},
 
 }
 
@@ -96,7 +95,14 @@ def generate_hook(
     """
     log = log or (lambda m: None)
     style_name = (hook_style or {}).get("style_name", "")
-    style = {**DEFAULT_HOOK_STYLE, **(hook_style or {})}
+    if style_name == "AI Future Poster" or style_name not in HOOK_STYLE_PRESETS:
+        style_name = "Clean White Box"
+    # Never allow removed/unknown preset-only renderer flags to leak through
+    # persisted settings or stale clients.
+    incoming_style = dict(hook_style or {})
+    incoming_style.pop("brush", None)
+    incoming_style.pop("shadow", None)
+    style = {**DEFAULT_HOOK_STYLE, **incoming_style}
     if style_name in HOOK_STYLE_PRESETS:
         style.update(HOOK_STYLE_PRESETS[style_name])
     ffmpeg_path = get_ffmpeg_path()
