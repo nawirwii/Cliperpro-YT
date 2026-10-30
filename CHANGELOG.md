@@ -7,6 +7,7 @@
 
 ### Fixed
 - Fixed the per-clip temp cleanup deleting the cached full source video (`*_NNN.*` also matched `section_NNN.mp4.download.mp4`), which defeated the in-memory download cache and caused every clip to re-download the full video.
+- "Generate with AI" no longer fails when the provider replies with no usable text ("AI returned empty response (no choices)"): it now retries once without `response_format` (some gateways silently drop the JSON-object format instead of rejecting it) and, if the reply is still empty, keeps the clip's original title/description instead of erroring. Genuine request failures (auth, rate limit, network) still surface as errors.
 
 ## [2.0.112] - 2026-10-25
 ### Fixed
