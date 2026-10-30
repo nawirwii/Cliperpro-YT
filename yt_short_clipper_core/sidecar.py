@@ -181,47 +181,77 @@ Requirements:
 Return ONLY valid JSON in this exact format:
 {{"title": "...", "description": "..."}}"""
 
-        # Try with response_format first (OpenAI, compatible providers)
-        # If it fails with unsupported parameter error, retry without it.
-        response = None
+        # Some providers answer 200 OK but with no usable text: either no
+        # choices at all, or an empty message (seen with gateways that
+        # silently drop response_format=json_object instead of rejecting
+        # it). The old code raised here, so the button hard-failed on a
+        # provider quirk. Now: retry once without response_format, and if
+        # the reply is still empty, fall back to the clip's own title/hook
+        # instead of failing — the button must never leave the user with
+        # nothing. Genuine request failures (auth, rate limit, network)
+        # still raise, so a broken configuration stays visible.
+        messages = [
+            {"role": "system", "content": f"You are a social media expert who creates viral content for TikTok/Reels/Shorts in {language}. Always respond with valid JSON only."},
+            {"role": "user", "content": prompt},
+        ]
+
+        def _create(use_json_format: bool):
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.8,
+                "max_tokens": 500,
+            }
+            if use_json_format:
+                kwargs["response_format"] = {"type": "json_object"}
+            return client.chat.completions.create(**kwargs)
+
+        def _raw_of(resp: Any) -> str:
+            if resp is None:
+                return ""
+            choices = getattr(resp, "choices", None) or []
+            if not choices:
+                return ""
+            content = getattr(choices[0].message, "content", None)
+            return content.strip() if content else ""
+
+        raw = ""
+        tried_plain = False
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": f"You are a social media expert who creates viral content for TikTok/Reels/Shorts in {language}. Always respond with valid JSON only."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.8,
-                max_tokens=500,
-                response_format={"type": "json_object"},
-            )
+            raw = _raw_of(_create(True))
         except BadRequestError as e:
             # Check if error is about unsupported response_format
             err_msg = str(e).lower()
             if "response_format" in err_msg or "unsupported" in err_msg or "not supported" in err_msg:
                 write_json({"event": "log", "message": f"Provider doesn't support response_format, retrying without it: {e}"})
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": f"You are a social media expert who creates viral content for TikTok/Reels/Shorts in {language}. Always respond with valid JSON only."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.8,
-                    max_tokens=500,
-                )
+                tried_plain = True
+                try:
+                    raw = _raw_of(_create(False))
+                except Exception as e2:
+                    raise SidecarError(f"AI request failed: {e2}")
             else:
                 raise SidecarError(f"AI request failed: {e}")
         except Exception as e:
             # For other errors (auth, rate limit, network), don't retry - surface the error
             raise SidecarError(f"AI request failed: {e}")
 
-        if response is None:
-            raise SidecarError("AI request failed: no response")
-
-        raw = response.choices[0].message.content.strip() if response.choices else ""
+        if not raw and not tried_plain:
+            # Empty reply with json_object requested: some gateways drop the
+            # format instead of erroring, so one plain retry often works.
+            write_json({"event": "log", "message": "AI returned an empty reply — retrying without response_format..."})
+            try:
+                raw = _raw_of(_create(False))
+            except Exception as e:
+                raise SidecarError(f"AI request failed: {e}")
 
         if not raw:
-            raise SidecarError("AI returned empty response (no choices)")
+            # Still empty after the retry: return the clip's own title/hook
+            # rather than failing the button outright.
+            write_json({"event": "log", "message": "AI reply still empty — keeping the original title/description."})
+            return {
+                "title": payload.get("title", "").strip(),
+                "description": payload.get("hook_text", payload.get("description", "")).strip(),
+            }
 
         # Strip markdown code fences if present
         if raw.startswith("```"):
