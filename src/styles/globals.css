@@ -1,104 +1,134 @@
+@import url("https://fonts.googleapis.com/css2?family=Host+Grotesk:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap");
 @import "tailwindcss";
 
+/* ───────────────────────────────────────────────────────
+   Bauhaus design tokens (authoritative --dp-* variables).
+   "Bauhaus Host" is the token name for the Host Grotesk
+   family loaded above; it falls back to Host Grotesk itself.
+   ─────────────────────────────────────────────────────── */
+:root {
+  --dp-color-ground: #f5f4ee;
+  --dp-color-ink: #000000;
+  --dp-color-accent: #ff0000;
+  --dp-color-field: #0000ff;
+  --dp-color-field-support: #ffff00;
+  --dp-color-quiet: #e8e8e8;
+  --dp-color-on-field: #ffffff;
+  --dp-typography-face: "Bauhaus Host", sans-serif;
+  --dp-typography-body: 18px;
+  --dp-typography-reading: 17px;
+  --dp-typography-label: 15px;
+  --dp-typography-caption: 14px;
+  --dp-typography-weight-display: 800;
+  --dp-typography-weight-action: 750;
+  --dp-typography-weight-label: 650;
+  --dp-typography-weight-reading: 450;
+  --dp-typography-reading-leading: 1.5;
+  --dp-spacing-gutter: clamp(22px, 4.45cqi, 72px);
+  --dp-radius-square: 0;
+  --dp-radius-circle: 50%;
+  --dp-border-rule: 4px;
+  --dp-border-rule-compact: 3px;
+  --dp-motion-interaction: 0s;
+}
+
 @theme {
-  /* Backgrounds */
-  --color-bg-primary: #FFFFFF;
-  --color-bg-secondary: #F8FAFC;
-  --color-bg-card: #F0F4FF;
-  --color-bg-sidebar: #FAFBFF;
-  --color-bg-hover: #E8EEFF;
-  --color-bg-input: #FFFFFF;
+  /* Backgrounds — off-white ground, white planes, quiet rules */
+  --color-bg-primary: #f5f4ee;
+  --color-bg-secondary: #f5f4ee;
+  --color-bg-card: #ffffff;
+  --color-bg-sidebar: #ff0000;
+  --color-bg-hover: #e8e8e8;
+  --color-bg-input: #ffffff;
 
-  /* Borders */
-  --color-border: #E2E8F0;
-  --color-border-light: #F1F5F9;
-  --color-border-focus: #3B82F6;
+  /* Borders — heavy black seams, lighter inner rules */
+  --color-border: #000000;
+  --color-border-light: #d4d4d4;
+  --color-border-focus: #0000ff;
 
-  /* Accent */
-  --color-accent: #2563EB;
-  --color-accent-hover: #1D4ED8;
-  --color-accent-light: #DBEAFE;
+  /* Accent — flat red plane; hover fills black, press compresses */
+  --color-accent: #ff0000;
+  --color-accent-hover: #000000;
+  --color-accent-light: #e8e8e8;
 
   /* Text */
-  --color-text-primary: #0F172A;
-  --color-text-secondary: #475569;
-  --color-text-muted: #94A3B8;
-  --color-text-on-accent: #FFFFFF;
+  --color-text-primary: #000000;
+  --color-text-secondary: #1a1a1a;
+  --color-text-muted: #525252;
+  --color-text-on-accent: #ffffff;
 
-  /* Semantic */
-  --color-success: #16A34A;
-  --color-success-bg: #F0FDF4;
-  --color-warning: #CA8A04;
-  --color-warning-bg: #FEFCE8;
-  --color-error: #DC2626;
-  --color-error-bg: #FEF2F2;
+  /* Semantic — flat fills; never color alone (icons/text accompany) */
+  --color-success: #15803d;
+  --color-success-bg: #e8f5e9;
+  --color-warning: #000000;
+  --color-warning-bg: #ffff00;
+  --color-error: #ff0000;
+  --color-error-bg: #ffe5e5;
 
-  /* Radius */
-  --radius-sm: 0.5rem;
-  --radius: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-full: 9999px;
+  /* Radius — square everywhere; circles only for key actions */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius: 0;
+  --radius-lg: 0;
+  --radius-full: 50%;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+  /* Shadows — hard offsets only, no soft blur */
+  --shadow-sm: 2px 2px 0 #000000;
+  --shadow: 4px 4px 0 #000000;
+  --shadow-lg: 6px 6px 0 #000000;
 
-  /* Font */
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Font — Host Grotesk bound to "Bauhaus Host" */
+  --font-sans: "Bauhaus Host", "Host Grotesk", ui-sans-serif, system-ui, sans-serif;
+
+  /* Weights */
+  --font-weight-display: 800;
+  --font-weight-action: 750;
+  --font-weight-label: 650;
+  --font-weight-reading: 450;
 }
 
 /* ───────────────────────────────────────────────────────
-   Dark theme — deep dark / pekat
+   Dark theme — black ground, same red/blue/yellow planes,
+   white seams and white hard shadows (Bauhaus negative).
    Applied when <html> has class="dark"
    ─────────────────────────────────────────────────────── */
 .dark {
   /* Backgrounds */
-  --color-bg-primary: #0c0c1c;
-  --color-bg-secondary: #111125;
-  --color-bg-card: #16162e;
-  --color-bg-sidebar: #0a0a18;
-  --color-bg-hover: #1e1e3a;
-  --color-bg-input: #0e0e20;
+  --color-bg-primary: #000000;
+  --color-bg-secondary: #0a0a0a;
+  --color-bg-card: #141414;
+  --color-bg-sidebar: #ff4d4d;
+  --color-bg-hover: #262626;
+  --color-bg-input: #141414;
 
   /* Borders */
-  --color-border: #26264a;
-  --color-border-light: #1a1a36;
-  --color-border-focus: #3B82F6;
+  --color-border: #f5f4ee;
+  --color-border-light: #3f3f3f;
+  --color-border-focus: #5b8cff;
 
-  /* Accent */
-  --color-accent: #3B82F6;
-  --color-accent-hover: #2563EB;
-  --color-accent-light: #172554;
+  /* Accent — brighter red stays legible on black */
+  --color-accent: #ff4d4d;
+  --color-accent-hover: #000000;
+  --color-accent-light: #262626;
 
   /* Text */
-  --color-text-primary: #F1F5F9;
-  --color-text-secondary: #CBD5E1;
-  --color-text-muted: #64748B;
-  --color-text-on-accent: #FFFFFF;
+  --color-text-primary: #f5f4ee;
+  --color-text-secondary: #d4d4d4;
+  --color-text-muted: #a3a3a3;
+  --color-text-on-accent: #ffffff;
 
   /* Semantic */
-  --color-success: #4ADE80;
+  --color-success: #4ade80;
   --color-success-bg: #052e16;
-  --color-warning: #FBBF24;
-  --color-warning-bg: #451a03;
-  --color-error: #F87171;
-  --color-error-bg: #450a0a;
+  --color-warning: #fde047;
+  --color-warning-bg: #422006;
+  --color-error: #ff4d4d;
+  --color-error-bg: #2a0a0a;
 
-  /* Shadows (deeper, more visible on dark) */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-/* Transition for smooth theme switching */
-html {
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-/* Only apply transition to backgrounds when theme toggles (not all elements) */
-html *:where(body, aside, main, div[class], section, article, header, footer) {
-  transition: background-color 0.3s ease, border-color 0.3s ease;
+  /* Hard shadows stay visible on black */
+  --shadow-sm: 2px 2px 0 #f5f4ee;
+  --shadow: 4px 4px 0 #f5f4ee;
+  --shadow-lg: 6px 6px 0 #f5f4ee;
 }
 
 @layer base {
@@ -110,8 +140,39 @@ html *:where(body, aside, main, div[class], section, article, header, footer) {
     background-color: var(--color-bg-secondary);
     color: var(--color-text-primary);
     font-family: var(--font-sans);
+    font-size: var(--dp-typography-body);
+    font-weight: var(--dp-typography-weight-reading);
+    line-height: var(--dp-typography-reading-leading);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Headings — heavy, compact, tightly tracked */
+  h1,
+  h2,
+  h3 {
+    font-weight: var(--dp-typography-weight-display);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+
+  h4,
+  h5,
+  h6 {
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+  }
+
+  /* Keyboard focus — always a visible blue outline */
+  :focus-visible {
+    outline: 3px solid var(--color-border-focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: #ffffff;
   }
 
   /* Prevent text selection on UI elements in desktop app */
@@ -119,7 +180,7 @@ html *:where(body, aside, main, div[class], section, article, header, footer) {
     user-select: none;
   }
 
-  /* Custom scrollbar */
+  /* Custom scrollbar — square thumb on the seam color */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -131,10 +192,22 @@ html *:where(body, aside, main, div[class], section, article, header, footer) {
 
   ::-webkit-scrollbar-thumb {
     background: var(--color-border);
-    border-radius: 3px;
+    border-radius: 0;
   }
 
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-text-muted);
+  }
+}
+
+/* Interaction is immediate (no decorative transitions) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Bauhaus visual restyle (UI only, no behavior change): off-white ground with flat red/blue/yellow planes, Host Grotesk type, square corners, 4px black seams and hard offset shadows. Sidebar is now a red plane with a white circular brand mark; buttons, cards, inputs, progress, sliders and switches follow the same language. Dark mode uses the same planes on a black ground with white seams. All routes, copy, controls and processing behavior are unchanged.
+
 ### Added
 - Persistent source-video library (DOWNLOAD ONCE, CLIP MANY TIMES): full YouTube downloads are now stored once under `output/source_videos/` and indexed in `output/database/video_history.json`, so later clips — including clips processed in a new app session — cut from the saved source instead of re-downloading. A source is re-downloaded only when its file is missing or fails validation, or when `forceRedownload` is set.
 

@@ -274,7 +274,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
         onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
       >
         <Card className="w-full max-w-md mx-4 p-0 overflow-hidden shadow-[var(--shadow-lg)] max-h-[90vh] overflow-y-auto">
@@ -615,7 +615,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       {/* Preview modal */}
       {previewSrc && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80"
           onClick={(e) => { if (e.target === e.currentTarget) setPreviewSrc(null); }}
         >
           <div className="relative max-w-sm w-full mx-4">

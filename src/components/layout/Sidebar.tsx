@@ -48,26 +48,26 @@ export function Sidebar() {
   }, []);
 
   const linkClass = cn(
-    "flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200 cursor-pointer",
-    "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
+    "flex items-center gap-3 px-3 py-2.5 rounded-none text-sm font-medium cursor-pointer",
+    "text-white/85 hover:bg-black hover:text-white",
     sidebarCollapsed && "justify-center px-0"
   );
 
   return (
     <aside
       className={cn(
-        "flex flex-col h-screen w-56 bg-[var(--color-bg-sidebar)] border-r border-[var(--color-border-light)] transition-all duration-300 ease-in-out shrink-0",
+        "flex flex-col h-screen w-56 bg-[var(--color-accent)] border-r-4 border-black transition-all duration-300 ease-in-out shrink-0",
         sidebarCollapsed && "w-14"
       )}
     >
-      {/* App brand */}
-      <div className={cn("px-4 py-4 border-b border-[var(--color-border-light)]", sidebarCollapsed && "px-0 flex justify-center")}>
+      {/* App brand — white circle on the red plane */}
+      <div className={cn("px-4 py-4 border-b-4 border-black", sidebarCollapsed && "px-0 flex justify-center")}>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-[var(--radius-sm)] bg-[var(--color-accent)] flex items-center justify-center shrink-0">
-            <Clapperboard className="w-4 h-4 text-[var(--color-text-on-accent)]" />
+          <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0">
+            <Clapperboard className="w-4 h-4 text-black" />
           </div>
           {!sidebarCollapsed && (
-            <span className="text-sm font-semibold text-[var(--color-text-primary)] whitespace-nowrap">
+            <span className="text-sm font-extrabold tracking-tight text-white whitespace-nowrap">
               Cliperpro
             </span>
           )}
@@ -83,10 +83,10 @@ export function Sidebar() {
             end={item.to === "/"}
             className={({ isActive }) =>
               cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200 w-full",
+                "flex items-center gap-3 px-3 py-2.5 rounded-none text-sm font-medium w-full",
                 isActive
-                  ? "bg-[var(--color-accent)] text-[var(--color-text-on-accent)] shadow-sm"
-                  : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
+                  ? "bg-black text-white"
+                  : "text-white/85 hover:bg-black hover:text-white",
                 sidebarCollapsed && "justify-center px-0 w-auto"
               )
             }
@@ -99,7 +99,7 @@ export function Sidebar() {
 
         {/* External links, served by the menu API */}
         {menuItems.length > 0 && (
-          <div className="my-2 border-t border-[var(--color-border-light)]" />
+          <div className="my-2 border-t-4 border-black" />
         )}
 
         {menuItems.map((item) => {
@@ -119,24 +119,24 @@ export function Sidebar() {
       </nav>
 
       {/* Advertise + theme + version + collapse toggle */}
-      <div className="p-3 border-t border-[var(--color-border-light)]">
+      <div className="p-3 border-t-4 border-black">
         {!sidebarCollapsed && (
           <>
             <button
               onClick={() => setShowAdvertise(true)}
-              className="w-full mb-2 text-[10px] leading-tight text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:underline transition-colors cursor-pointer text-center"
+              className="w-full mb-2 text-[10px] leading-tight text-white/70 hover:text-white hover:underline cursor-pointer text-center"
             >
               Want your link here?
             </button>
 
             <div className="mb-2 text-center">
-              <p className="text-[10px] text-[var(--color-text-muted)]">
+              <p className="text-[10px] text-white/70">
                 v{APP_VERSION}
               </p>
               {availableUpdate && (
                 <button
                   onClick={() => openUrl(availableUpdate.download_url)}
-                  className="text-[10px] text-[var(--color-accent)] hover:underline mt-0.5"
+                  className="text-[10px] text-white hover:underline mt-0.5"
                 >
                   Update: v{availableUpdate.version}
                 </button>
@@ -150,7 +150,7 @@ export function Sidebar() {
           <button
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             className={cn(
-              "flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)] transition-all duration-200 cursor-pointer",
+              "flex items-center gap-2 px-2 py-1.5 rounded-none text-white/70 hover:bg-black hover:text-white cursor-pointer",
               sidebarCollapsed && "px-0 justify-center"
             )}
             title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
@@ -169,7 +169,7 @@ export function Sidebar() {
           <button
             onClick={toggleSidebar}
             className={cn(
-              "flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-sm)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)] transition-all duration-200 cursor-pointer",
+              "flex items-center gap-2 px-2 py-1.5 rounded-none text-white/70 hover:bg-black hover:text-white cursor-pointer",
               sidebarCollapsed && "px-0 justify-center w-full"
             )}
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
