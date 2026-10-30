@@ -135,7 +135,7 @@ export function HighlightSelectionPage() {
       </div>
 
       {/* Sticky action bar */}
-      <div className="sticky bottom-0 -mx-6 px-6 py-4 bg-gradient-to-t from-[var(--color-bg-secondary)] via-[var(--color-bg-secondary)] to-transparent">
+      <div className="sticky bottom-0 -mx-6 px-6 py-4 bg-[var(--color-bg-secondary)] border-t-4 border-black">
         <Button
           size="lg"
           disabled={selectedCount === 0}

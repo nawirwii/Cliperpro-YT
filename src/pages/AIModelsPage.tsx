@@ -341,7 +341,7 @@ function AIProviderEditor({ settings, onSave }: AIProviderEditorProps) {
               </code>
             </p>
             {transcriptionPreset.localNote ? (
-              <p className="text-xs text-amber-500/90 border-l-2 border-amber-500/50 pl-2">
+              <p className="text-xs text-[var(--color-warning)] border-l-2 border-[var(--color-warning)] pl-2">
                 {transcriptionPreset.localNote}
               </p>
             ) : null}

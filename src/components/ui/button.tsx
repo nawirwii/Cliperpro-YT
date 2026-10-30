@@ -4,26 +4,26 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-sm)] text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-none text-[15px] font-action focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
   {
     variants: {
       variant: {
         default:
-          "bg-[var(--color-accent)] text-[var(--color-text-on-accent)] shadow-[var(--shadow-sm)] hover:bg-[var(--color-accent-hover)]",
+          "border-[3px] border-black bg-[var(--color-accent)] text-[var(--color-text-on-accent)] shadow-[var(--shadow)] hover:bg-[var(--color-accent-hover)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none",
         destructive:
-          "bg-[var(--color-error)] text-white shadow-[var(--shadow-sm)] hover:bg-[var(--color-error)]/90",
+          "border-[3px] border-black bg-black text-white shadow-[var(--shadow)] hover:bg-[var(--color-error)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none",
         outline:
-          "border border-[var(--color-border)] bg-[var(--color-bg-primary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
+          "border-[3px] border-black bg-[var(--color-bg-primary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] shadow-[var(--shadow)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none",
         secondary:
-          "bg-[var(--color-accent-light)] text-[var(--color-accent)] hover:bg-[var(--color-accent-light)]/80",
+          "border-[3px] border-black bg-[var(--color-accent-light)] text-[var(--color-accent)] hover:bg-[var(--color-accent-light)]/80 shadow-[var(--shadow)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none",
         ghost:
           "hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]",
         link: "text-[var(--color-accent)] underline-offset-4 hover:underline",
       },
       size: {
         default: "h-10 px-4 py-2",
-        sm: "h-8 rounded-[var(--radius-sm)] px-3 text-xs",
-        lg: "h-12 rounded-[var(--radius)] px-8 text-base",
+        sm: "h-8 rounded-none px-3 text-xs",
+        lg: "h-12 rounded-none px-8 text-base",
         icon: "h-10 w-10",
       },
     },
