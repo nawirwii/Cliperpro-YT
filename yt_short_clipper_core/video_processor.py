@@ -11,6 +11,7 @@ from .cookies import validate_cookies
 from .helpers import debug_log, get_aria2c_path, get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
 from .helpers import _get_app_dir
 from .gpu import build_video_enc_args
+from .source_library import lookup_source, record_source
 
 LogFn = Callable[[str], None]
 
@@ -686,6 +687,8 @@ def download_video_section(
     log: LogFn | None = None,
     max_height: int = 1080,
     gpu_config: dict[str, Any] | None = None,
+    library_root: str | Path | None = None,
+    force_redownload: bool = False,
 ) -> str:
     """Download a specific section of a YouTube video.
 
@@ -693,26 +696,47 @@ def download_video_section(
     caps = smaller download = faster on throttled links. Shorts output is
     1080x1920 max, so 720p is plenty for most cases.
 
+    DOWNLOAD ONCE, CLIP MANY TIMES: before any download, the persistent
+    source library (``library_root``) is consulted — a valid stored source
+    is cut locally with no download at all, even across app restarts. A
+    fresh download is stored into the library for the next run. Set
+    ``force_redownload`` to ignore both the in-memory cache and the
+    library (explicit user request).
+
     Returns path to the downloaded file.
     """
     log = log or debug_log
     start_clean = start_time.replace(",", ".")
     end_clean = end_time.replace(",", ".")
 
-    # Fast path: the full video for this (url, quality) was already downloaded
-    # by an earlier section — cut locally, no download at all.
+    # Fast path 1: the full video for this (url, quality) was already
+    # downloaded by an earlier section in this process — cut locally.
     cache_key = (url, max_height)
-    cached_full = _FULL_SOURCE_CACHE.get(cache_key)
-    if cached_full and Path(cached_full).exists():
-        log("Memakai video full dari cache (tanpa download ulang) — memotong section...")
-        return cut_video_section(
-            cached_full, output_path, start_clean, end_clean,
-            log=log, gpu_config=gpu_config,
-        )
+    if not force_redownload:
+        cached_full = _FULL_SOURCE_CACHE.get(cache_key)
+        if cached_full and Path(cached_full).exists():
+            log("Memakai video full dari cache (tanpa download ulang) — memotong section...")
+            return cut_video_section(
+                cached_full, output_path, start_clean, end_clean,
+                log=log, gpu_config=gpu_config,
+            )
+
+    # Fast path 2: the persistent source library — a valid stored source
+    # from an earlier run/session is cut locally, no download at all.
+    if library_root is not None and not force_redownload:
+        stored = lookup_source(library_root, url, max_height, log=log)
+        if stored is not None:
+            _FULL_SOURCE_CACHE[cache_key] = str(stored)
+            log("Memakai video sumber dari library (tanpa download ulang) — memotong section...")
+            return cut_video_section(
+                str(stored), output_path, start_clean, end_clean,
+                log=log, gpu_config=gpu_config,
+            )
 
     if is_ytdlp_module_available():
         return _download_section_module(
-            url, start_clean, end_clean, output_path, log, max_height, gpu_config
+            url, start_clean, end_clean, output_path, log, max_height, gpu_config,
+            library_root=library_root,
         )
     else:
         raise RuntimeError(
@@ -729,6 +753,7 @@ def _download_section_module(
     log: LogFn,
     max_height: int = 1080,
     gpu_config: dict[str, Any] | None = None,
+    library_root: str | Path | None = None,
 ) -> str:
     import yt_dlp
 
@@ -1215,6 +1240,15 @@ def _download_section_module(
     try:
         full_source = _do_download()
         _FULL_SOURCE_CACHE[(url, max_height)] = full_source
+        # DOWNLOAD ONCE, CLIP MANY TIMES: move the fresh full download into
+        # the persistent library and cut from there. When recording fails
+        # the staged file is left untouched and the cut below proceeds from
+        # it, exactly as before — the clip must not fail over the library.
+        if library_root is not None:
+            stored = record_source(library_root, url, max_height, full_source, log=log)
+            if stored is not None:
+                full_source = str(stored)
+                _FULL_SOURCE_CACHE[(url, max_height)] = full_source
     finally:
         stop_evt.set()
         hb_thread.join(timeout=2)

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- Persistent source-video library (DOWNLOAD ONCE, CLIP MANY TIMES): full YouTube downloads are now stored once under `output/source_videos/` and indexed in `output/database/video_history.json`, so later clips — including clips processed in a new app session — cut from the saved source instead of re-downloading. A source is re-downloaded only when its file is missing or fails validation, or when `forceRedownload` is set.
+
+### Fixed
+- Fixed the per-clip temp cleanup deleting the cached full source video (`*_NNN.*` also matched `section_NNN.mp4.download.mp4`), which defeated the in-memory download cache and caused every clip to re-download the full video.
+
 ## [2.0.112] - 2026-10-25
 ### Fixed
 - Credit watermark font size now stays synchronized between Settings preview and processed videos by scaling against the final video width.
