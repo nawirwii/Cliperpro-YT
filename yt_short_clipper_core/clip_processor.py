@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .video_processor import download_video_section, cut_video_section
+from .source_library import library_paths
 from .portrait import convert_to_portrait, convert_to_portrait_centered, convert_to_portrait_pane
 from .split_screen import combine_split_screen, OUTPUT_HEIGHT
 from .hook_generator import generate_hook
@@ -184,6 +185,12 @@ def process_selected_highlights(
     clips_dir = session_path / "clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
+    # Persistent source library (DOWNLOAD ONCE, CLIP MANY TIMES): stored
+    # sources live under output/source_videos/, shared across sessions, so
+    # a later batch of clips for the same URL cuts from the saved file
+    # instead of downloading again.
+    library_root, _library_db = library_paths(session_path)
+
     temp_dir = session_path / "_temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -285,6 +292,8 @@ def process_selected_highlights(
                 log=log,
                 max_height=max_height,
                 gpu_config=gpu_config,
+                library_root=str(library_root),
+                force_redownload=bool(options.get("forceRedownload", False)),
             )
         log(f"[{i}/{total}] Section ready: {video_path}")
 
@@ -463,8 +472,13 @@ def process_selected_highlights(
             "title": h.get("title", ""),
         })
 
-        # Cleanup temp files for this clip
+        # Cleanup temp files for this clip. Never delete the staged full
+        # download (section_NNN.mp4.download.mp4): the old glob also matched
+        # it, which silently deleted the cached source after clip 1 and made
+        # every following clip re-download the whole video.
         for temp_file in temp_dir.glob(f"*_{i:03d}.*"):
+            if ".download." in temp_file.name:
+                continue
             try:
                 temp_file.unlink()
             except Exception:
