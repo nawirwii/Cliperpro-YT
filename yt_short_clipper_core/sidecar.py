@@ -251,6 +251,7 @@ Return ONLY valid JSON in this exact format:
             return {
                 "title": payload.get("title", "").strip(),
                 "description": payload.get("hook_text", payload.get("description", "")).strip(),
+                "fallback": True,
             }
 
         # Strip markdown code fences if present
@@ -263,6 +264,7 @@ Return ONLY valid JSON in this exact format:
             title = parsed.get("title", "").strip()
             description = parsed.get("description", "").strip()
             # If both are empty, fall back to using the original clip title/hook as a sensible default.
+            fallback = False
             if not title and not description:
                 # Use payload's original title as fallback title, and description as hook text.
                 fallback_title = payload.get("title", "").strip()
@@ -271,13 +273,14 @@ Return ONLY valid JSON in this exact format:
                     title = fallback_title
                 if fallback_desc:
                     description = fallback_desc
-            return {"title": title, "description": description}
+    fallback = True
+            return {"title": title, "description": description, "fallback": fallback}
         except Exception:
             # If JSON parsing fails completely, treat raw content as title.
             stripped = raw.strip()
             if not stripped:
                 raise SidecarError("AI returned empty response")
-            return {"title": stripped, "description": ""}
+            return {"title": stripped, "description": "", "fallback": False}
 
     if command == "detect_gpu":
         from yt_short_clipper_core.gpu import detect_gpu
