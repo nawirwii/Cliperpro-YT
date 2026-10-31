@@ -147,7 +147,7 @@ export function ClipDetailPage() {
 
     setGenerating(true);
     try {
-      const result = await invoke<{ title: string; description: string }>("generate_social_title", {
+      const result = await invoke<{ title: string; description: string; fallback?: boolean }>("generate_social_title", {
         title: state.title,
         hookText: state.hookText,
         description: state.description,
@@ -165,7 +165,9 @@ export function ClipDetailPage() {
       if (result.description) setPostDescription(result.description);
       const hasTitle = !!result?.title;
       const hasDesc = !!result?.description;
-      if (hasTitle || hasDesc) {
+      if (result.fallback) {
+        toast.warning("AI tidak mengembalikan teks — dipakai judul/deskripsi asli. Coba model lain atau periksa provider.");
+      } else if (hasTitle || hasDesc) {
         toast.success(hasTitle && hasDesc ? "Title & description generated" : hasTitle ? "Title generated" : "Description generated");
       }
     } catch (err) {
