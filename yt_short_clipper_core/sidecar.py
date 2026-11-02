@@ -273,7 +273,7 @@ Return ONLY valid JSON in this exact format:
                     title = fallback_title
                 if fallback_desc:
                     description = fallback_desc
-    fallback = True
+                fallback = True
             return {"title": title, "description": description, "fallback": fallback}
         except Exception:
             # If JSON parsing fails completely, treat raw content as title.

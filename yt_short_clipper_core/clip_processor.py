@@ -1,6 +1,7 @@
 """Process selected highlights: download → portrait → hook → caption → watermark."""
 
 import json
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,27 @@ from .srt_parser import parse_srt_segments, parse_timestamp
 from .watermark import apply_watermark
 
 LogFn = Callable[[str], None]
+
+
+def sanitize_clip_filename(title: str) -> str:
+    """Turn a clip title into a Windows-safe file stem.
+
+    Rules (mirrored by sanitizeClipFilename in HighlightSelectionPage.tsx):
+    - Replace Windows-illegal characters <>:"/\\|?* and control characters
+      (U+0000-U+001F) with "-".
+    - Collapse runs of whitespace to a single space.
+    - Strip leading/trailing spaces and dots.
+    - Cap at 120 characters, then strip trailing spaces/dots again.
+    - Fall back to "Untitled" when nothing remains.
+    Other Unicode (e.g. Indonesian letters) is kept as-is.
+    """
+    name = "".join(
+        "-" if (c in '<>:"/\\|?*' or ord(c) < 0x20) else c for c in (title or "")
+    )
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    if len(name) > 120:
+        name = name[:120].rstrip(" .")
+    return name or "Untitled"
 
 
 def _load_caption_words(session_path: Path, log: LogFn) -> list[dict[str, Any]]:
@@ -246,14 +268,23 @@ def process_selected_highlights(
         # Use highlight_index from the highlight data if available (for dedup)
         highlight_index = h.get("_highlight_index", i - 1)
 
-        # Check if this highlight was already processed
+        # Check if this highlight was already processed. A titled file from
+        # this build wins; a legacy master.mp4 from older builds still counts
+        # so previously processed clips are not re-processed.
         clip_folder = clips_dir / f"clip_{highlight_index:03d}"
-        existing_master = clip_folder / "master.mp4"
-        if existing_master.exists():
+        titled_file = clip_folder / f"{sanitize_clip_filename(h.get('title', 'Untitled'))}.mp4"
+        legacy_master = clip_folder / "master.mp4"
+        if titled_file.exists():
+            existing_file = titled_file
+        elif legacy_master.exists():
+            existing_file = legacy_master
+        else:
+            existing_file = None
+        if existing_file is not None:
             log(f"[{i}/{total}] Already processed (clip_{highlight_index:03d}), skipping")
             results.append({
                 "clip_index": highlight_index,
-                "output_path": str(existing_master),
+                "output_path": str(existing_file),
                 "title": h.get("title", ""),
                 "skipped": True,
             })
@@ -442,10 +473,10 @@ def process_selected_highlights(
         else:
             log(f"[{i}/{total}] Watermark overlay skipped (disabled)")
 
-        # Save the final video as output
+        # Save the final video as output, named after the clip title
         clip_folder = clips_dir / f"clip_{highlight_index:03d}"
         clip_folder.mkdir(parents=True, exist_ok=True)
-        output_file = clip_folder / "master.mp4"
+        output_file = clip_folder / f"{sanitize_clip_filename(h.get('title', 'Untitled'))}.mp4"
         shutil.copy2(video_path, output_file)
 
         # Save metadata
