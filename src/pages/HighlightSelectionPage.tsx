@@ -21,6 +21,19 @@ import { useSessionStore } from "@/stores/sessionStore";
 import type { Highlight } from "@/hooks/highlights";
 import { ProcessConfirmDialog } from "@/components/ProcessConfirmDialog";
 
+// Mirror of sanitize_clip_filename in yt_short_clipper_core/clip_processor.py:
+// Windows-illegal chars and control chars become "-", whitespace runs collapse
+// to one space, leading/trailing spaces and dots are stripped, capped at 120
+// chars, "Untitled" fallback. Other Unicode is kept as-is.
+function sanitizeClipFilename(title: string): string {
+  let name = (title || "").replace(/[<>:\"/\\|?*\u0000-\u001f]/g, "-");
+  name = name.replace(/\s+/g, " ").replace(/^[ .]+/, "").replace(/[ .]+$/, "");
+  if (name.length > 120) {
+    name = name.slice(0, 120).replace(/[ .]+$/, "");
+  }
+  return name || "Untitled";
+}
+
 function viralityStyle(score: number) {
   if (score >= 7) {
     return {
@@ -190,7 +203,7 @@ function HighlightCard({ index, highlight, selected, processed, sessionDir, onTo
   const navigate = useNavigate();
   const v = viralityStyle(highlight.virality_score);
 
-  const clipPath = `${sessionDir}\\clips\\clip_${String(index).padStart(3, "0")}\\master.mp4`;
+  const clipPath = `${sessionDir}\\clips\\clip_${String(index).padStart(3, "0")}\\${sanitizeClipFilename(highlight.title)}.mp4`;
 
   const handleOpenClip = (e: React.MouseEvent) => {
     e.stopPropagation();
