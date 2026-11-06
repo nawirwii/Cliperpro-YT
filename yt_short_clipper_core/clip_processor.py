@@ -80,7 +80,7 @@ def _words_for_clip(
 def _load_session_channel(session_path: Path) -> str:
     """Load the YouTube channel name saved during the find-highlights phase.
 
-    The placeholder ``{channel}`` in the credit text is replaced with this
+    The placeholder `{channel}` in the credit text is replaced with this
     value at render time. Falls back to an empty string when the session file
     is missing or the channel could not be detected.
     """
@@ -105,10 +105,10 @@ def _resolve_credit_text(
     """Apply per-clip credit text overrides and resolve the {channel} placeholder.
 
     Priority:
-      1. ``options.creditText`` — the value typed in the process confirm dialog
+      1. `options.creditText` — the value typed in the process confirm dialog
          (this is what the user actually sees, so it wins over saved config).
-      2. ``ai.credit_watermark.text`` from the saved app config.
-    Then ``{channel}`` is replaced with the real YouTube channel name.
+      2. `ai.credit_watermark.text` from the saved app config.
+    Then `{channel}` is replaced with the real YouTube channel name.
     """
     if not credit_config:
         return None
@@ -134,15 +134,15 @@ def _resolve_credit_text(
 def _resolve_gpu_config(gpu_config: dict[str, Any] | None, log: LogFn) -> dict[str, Any] | None:
     """Ensure an enabled GPU config carries an encoder.
 
-    Older builds saved only ``{"enabled": true}`` — no encoder/preset — so the
-    backend saw ``encoder=None`` and silently encoded with libx264 (CPU). If
+    Older builds saved only `{"enabled": true}` — no encoder/preset — so the
+    backend saw `encoder=None` and silently encoded with libx264 (CPU). If
     enabled but missing an encoder, re-detect once at runtime so existing users
     get hardware encoding without re-toggling the setting.
 
-    The returned dict carries both key shapes: the current ``enabled`` /
-    ``encoder`` / ``preset`` shape used by portrait/split_screen, plus the
-    legacy ``available`` / ``name`` shape still expected by
-    ``build_video_enc_args`` (hook/caption burn steps) and video_processor's
+    The returned dict carries both key shapes: the current `enabled` /
+    `encoder` / `preset` shape used by portrait/split_screen, plus the
+    legacy `available` / `name` shape still expected by
+    `build_video_enc_args` (hook/caption burn steps) and video_processor's
     cut encode. Without this, those steps silently fall back to CPU even
     with GPU acceleration enabled.
     """
@@ -196,11 +196,11 @@ def process_selected_highlights(
 ) -> dict[str, Any]:
     """Process selected highlights and return output info.
 
-    ``local_path`` (optional): when set, sections are cut from this local file
-    with ``cut_video_section`` instead of being downloaded from YouTube.
+    `local_path` (optional): when set, sections are cut from this local file
+    with `cut_video_section` instead of being downloaded from YouTube.
 
     options keys: addCaptions, addHook, addWatermark, addCreditWatermark,
-                  gpuAcceleration (optional, for hardware encoding)
+                  introPath, outroPath, gpuAcceleration (optional, for hardware encoding)
     ai keys: api_key, base_url, model, hook_style (dict, includes duration_seconds)
     """
     gpu_config = _resolve_gpu_config(options.get("gpuAcceleration"), log)
@@ -224,6 +224,9 @@ def process_selected_highlights(
     add_captions = options.get("addCaptions", False)
     add_watermark = options.get("addWatermark", False)
     add_credit_watermark = options.get("addCreditWatermark", False)
+    add_intro_outro = options.get("addIntroOutro", False)
+    intro_path = options.get("introPath")
+    outro_path = options.get("outroPath")
     caption_style = options.get("captionStyle", "Creator Pop")
 
 
@@ -474,6 +477,18 @@ def process_selected_highlights(
         else:
             log(f"[{i}/{total}] Watermark overlay skipped (disabled)")
 
+        # Step 5.5: Intro/Outro (if enabled)
+        if add_intro_outro and (intro_path or outro_path):
+            intro_outro_output_path = str(temp_dir / f"with_intro_outro_{i:03d}.mp4")
+            video_path = apply_intro_outro(
+                input_path=video_path,
+                output_path=intro_outro_output_path,
+                intro_path=intro_path,
+                outro_path=outro_path,
+                log=lambda m: log(f"[{i}/{total}] {m}"),
+            )
+            log(f"[{i}/{total}] Intro/Outro processing complete")
+
         # Save the final video as output, named after the clip title
         clip_folder = clips_dir / f"clip_{highlight_index:03d}"
         clip_folder.mkdir(parents=True, exist_ok=True)
@@ -490,6 +505,9 @@ def process_selected_highlights(
             "duration_seconds": h.get("duration_seconds", 0),
             "has_hook": add_hook and bool(h.get("hook_text")),
             "has_captions": clip_had_captions,
+            "has_intro_outro": add_intro_outro and (intro_path or outro_path),
+            "intro_path": intro_path,
+            "outro_path": outro_path,
             "youtube_title": h.get("title", ""),
             "youtube_description": h.get("description", ""),
             "processed_at": datetime.now().isoformat(),
@@ -502,42 +520,10 @@ def process_selected_highlights(
             "clip_index": highlight_index,
             "output_path": str(output_file),
             "title": h.get("title", ""),
+            "skipped": False,
         })
 
-        # Cleanup temp files for this clip. Never delete the staged full
-        # download (section_NNN.mp4.download.mp4): the old glob also matched
-        # it, which silently deleted the cached source after clip 1 and made
-        # every following clip re-download the whole video.
-        for temp_file in temp_dir.glob(f"*_{i:03d}.*"):
-            if ".download." in temp_file.name:
-                continue
-            try:
-                temp_file.unlink()
-            except Exception:
-                pass
-
-    # Update session status
-    session_data_file = session_path / "session_data.json"
-    if session_data_file.exists():
-        with open(session_data_file, "r", encoding="utf-8") as f:
-            session_data = json.load(f)
-        session_data["status"] = "completed"
-        session_data["completed_at"] = datetime.now().isoformat()
-        session_data["clips_processed"] = total
-
-        # Track which highlight indices have been processed
-        processed_indices = session_data.get("processed_highlights", [])
-        for r in results:
-            idx = r.get("clip_index")
-            if idx is not None and idx not in processed_indices and not r.get("skipped"):
-                processed_indices.append(idx)
-        session_data["processed_highlights"] = sorted(set(processed_indices))
-
-        with open(session_data_file, "w", encoding="utf-8") as f:
-            json.dump(session_data, f, indent=2, ensure_ascii=False)
-
-    log(f"All {total} clips processed successfully!")
-
+    log(f"Processed {len(results)} clip(s)")
     return {
         "session_dir": session_dir,
         "clips_dir": str(clips_dir),
@@ -552,93 +538,82 @@ def apply_intro_outro(
     intro_path: str | None,
     outro_path: str | None,
     log: LogFn,
-    crossfade_dur: float = 0.3,
 ) -> str:
-    """Concatenate intro/outro with crossfade using FFmpeg's xfade filter.
+    """Apply intro and/or outro video with 0.9s crossfade transition.
     
     Args:
-        input_path: Path to the main video
-        output_path: Path for the output video
+        input_path: Path to the clip video
+        output_path: Path for the output video with intro/outro
         intro_path: Path to intro video (optional)
         outro_path: Path to outro video (optional)
         log: Logging function
-        crossfade_dur: Crossfade duration in seconds (default 0.3)
     
     Returns:
-        Path to output video on success, input_path on failure
+        Path to the output video (or input_path on failure)
     """
-    if not intro_path and not outro_path:
-        return input_path
-
-    def get_duration(path: str) -> float:
-        result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", path],
-            capture_output=True, text=True
-        )
-        try:
-            return float(result.stdout.strip())
-        except:
-            return 0.0
-
     try:
-        intro_dur = get_duration(intro_path) if intro_path else 0
-        main_dur = get_duration(input_path)
-        outro_dur = get_duration(outro_path) if outro_path else 0
-        
-        log(f"Intro duration: {intro_dur}s, Main: {main_dur}s, Outro: {outro_dur}s")
+        crossfade_dur = 0.9
         
         if intro_path and outro_path:
-            # Both intro and outro: use ffmpeg concat
+            # Both intro and outro: concat with crossfade at both ends
             cmd = [
                 "ffmpeg", "-y",
                 "-i", intro_path,
                 "-i", input_path,
                 "-i", outro_path,
                 "-filter_complex",
-                f"[1:v]format=yuv420p[v_main];"
-                f"[0:a]apad[af0];"
-                f"[af0][1:a]acrossfade=d={crossfade_dur}[af1];"
-                f"[af1][2:a]acrossfade=d={crossfade_dur}[a]",
-                "-map", "[v_main]",
+                f"[0:v]format=yuv420p[v_intro];"
+                f"[v_intro][1:v]xfade=transition=fade:d={crossfade_dur}:offset=0[v0];"
+                f"[v0][2:v]xfade=transition=fade:d={crossfade_dur}:offset=0[v];"
+                f"[0:a]apad[ia];"
+                f"[ia][1:a]acrossfade=d={crossfade_dur}[ma];"
+                f"[ma][2:a]acrossfade=d={crossfade_dur}[a]",
+                "-map", "[v]",
                 "-map", "[a]",
                 output_path
             ]
-            log(f"Building intro+outro")
+            log("Building intro + outro with crossfade")
         elif intro_path:
+            # Intro only
             cmd = [
                 "ffmpeg", "-y",
                 "-i", intro_path,
                 "-i", input_path,
                 "-filter_complex",
-                f"[0:v]format=yuv420p,fade=t=out:st={max(0, intro_dur-crossfade_dur)}:d={crossfade_dur}[v0];"
-                f"[v0][1:v]concat=n=2:v=1:a=1[v];"
-                f"[0:a]apad[af];"
-                f"[af][1:a]concat=n=2:v=0:a=1[a]",
-                "-map", "[v]", "-map", "[a]",
+                f"[0:v]format=yuv420p[v0];"
+                f"[v0][1:v]xfade=transition=fade:d={crossfade_dur}:offset=0[v];"
+                f"[0:a]apad,apad[ia];"
+                f"[ia][1:a]acrossfade=d={crossfade_dur}[a]",
+                "-map", "[v]",
+                "-map", "[a]",
                 output_path
             ]
-            log(f"Building intro only")
-        else:
+            log("Building intro only")
+        elif outro_path:
+            # Outro only
             cmd = [
                 "ffmpeg", "-y",
                 "-i", input_path,
                 "-i", outro_path,
                 "-filter_complex",
-                f"[0:v]format=yuv420p,fade=t=out:st={max(0, main_dur-crossfade_dur)}:d={crossfade_dur}[v0];"
-                f"[0:a]afade=t=out:st={max(0, main_dur-crossfade_dur)}:d={crossfade_dur}[af0];"
-                f"[v0][1:v]concat=n=2:v=1:a=0[v];"
-                f"[af0][1:a]concat=n=2:v=0:a=1[a]",
-                "-map", "[v]", "-map", "[a]",
+                f"[0:v]format=yuv420p[v0];"
+                f"[v0][1:v]xfade=transition=fade:d={crossfade_dur}:offset=0[v];"
+                f"[0:a]apad,apad[oa];"
+                f"[oa][1:a]acrossfade=d={crossfade_dur}[a]",
+                "-map", "[v]",
+                "-map", "[a]",
                 output_path
             ]
-            log(f"Building outro only")
+            log("Building outro only")
+        else:
+            log("No intro or outro provided")
+            return input_path
         
-        log(f"Running FFmpeg intro/outro...")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             log(f"FFmpeg error: {result.stderr}")
             return input_path
+        
         log("Intro/outro processing complete")
         return output_path
     except Exception as e:
