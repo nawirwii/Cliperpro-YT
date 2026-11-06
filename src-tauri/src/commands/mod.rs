@@ -1447,7 +1447,7 @@ pub fn delete_intro_outro(app: tauri::AppHandle, path: String) -> Result<(), Str
     
     // Safety: only allow deleting from intro_outro directory
     let intro_outro_dir = cookies_dir(&app)?.join("intro_outro");
-    if !path.starts_with(&intro_outro_dir.to_string_lossy()) {
+    if !p.starts_with(&intro_outro_dir) {
         return Err("Refusing to delete: not in intro_outro directory".to_string());
     }
     
