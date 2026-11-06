@@ -544,3 +544,103 @@ def process_selected_highlights(
         "total_clips": total,
         "results": results,
     }
+
+
+def apply_intro_outro(
+    input_path: str,
+    output_path: str,
+    intro_path: str | None,
+    outro_path: str | None,
+    log: LogFn,
+    crossfade_dur: float = 0.3,
+) -> str:
+    """Concatenate intro/outro with crossfade using FFmpeg's xfade filter.
+    
+    Args:
+        input_path: Path to the main video
+        output_path: Path for the output video
+        intro_path: Path to intro video (optional)
+        outro_path: Path to outro video (optional)
+        log: Logging function
+        crossfade_dur: Crossfade duration in seconds (default 0.3)
+    
+    Returns:
+        Path to output video on success, input_path on failure
+    """
+    if not intro_path and not outro_path:
+        return input_path
+
+    def get_duration(path: str) -> float:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True
+        )
+        try:
+            return float(result.stdout.strip())
+        except:
+            return 0.0
+
+    try:
+        intro_dur = get_duration(intro_path) if intro_path else 0
+        main_dur = get_duration(input_path)
+        outro_dur = get_duration(outro_path) if outro_path else 0
+        
+        log(f"Intro duration: {intro_dur}s, Main: {main_dur}s, Outro: {outro_dur}s")
+        
+        if intro_path and outro_path:
+            # Both intro and outro: use ffmpeg concat
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", intro_path,
+                "-i", input_path,
+                "-i", outro_path,
+                "-filter_complex",
+                f"[1:v]format=yuv420p[v_main];"
+                f"[0:a]apad[af0];"
+                f"[af0][1:a]acrossfade=d={crossfade_dur}[af1];"
+                f"[af1][2:a]acrossfade=d={crossfade_dur}[a]",
+                "-map", "[v_main]",
+                "-map", "[a]",
+                output_path
+            ]
+            log(f"Building intro+outro")
+        elif intro_path:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", intro_path,
+                "-i", input_path,
+                "-filter_complex",
+                f"[0:v]format=yuv420p,fade=t=out:st={max(0, intro_dur-crossfade_dur)}:d={crossfade_dur}[v0];"
+                f"[v0][1:v]concat=n=2:v=1:a=1[v];"
+                f"[0:a]apad[af];"
+                f"[af][1:a]concat=n=2:v=0:a=1[a]",
+                "-map", "[v]", "-map", "[a]",
+                output_path
+            ]
+            log(f"Building intro only")
+        else:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", input_path,
+                "-i", outro_path,
+                "-filter_complex",
+                f"[0:v]format=yuv420p,fade=t=out:st={max(0, main_dur-crossfade_dur)}:d={crossfade_dur}[v0];"
+                f"[0:a]afade=t=out:st={max(0, main_dur-crossfade_dur)}:d={crossfade_dur}[af0];"
+                f"[v0][1:v]concat=n=2:v=1:a=0[v];"
+                f"[af0][1:a]concat=n=2:v=0:a=1[a]",
+                "-map", "[v]", "-map", "[a]",
+                output_path
+            ]
+            log(f"Building outro only")
+        
+        log(f"Running FFmpeg intro/outro...")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            log(f"FFmpeg error: {result.stderr}")
+            return input_path
+        log("Intro/outro processing complete")
+        return output_path
+    except Exception as e:
+        log(f"Intro/outro processing failed: {e}")
+        return input_path

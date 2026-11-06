@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { X, Film, AlignLeft, Quote, Image as ImageIcon, User, ScanFace, Square, Eye, Sparkles, Zap, MonitorPlay, FolderOpen, DownloadCloud, Volume2, Mic, Gamepad2, MoonStar, type LucideIcon } from "lucide-react";
+import { X, Film, AlignLeft, Quote, Image as ImageIcon, User, ScanFace, Square, Eye, Sparkles, Zap, MonitorPlay, FolderOpen, DownloadCloud, Volume2, Mic, Gamepad2, MoonStar, type LucideIcon, Trash2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
@@ -118,6 +119,10 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   const [addCaptions, setAddCaptions] = useState(true);
   const [addHook, setAddHook] = useState(true);
   const [addIntroOutro, setAddIntroOutro] = useState(config.introOutro.enabled);
+  const [introPath, setIntroPath] = useState<string | null>(null);
+  const [outroPath, setOutroPath] = useState<string | null>(null);
+  const [introFiles, setIntroFiles] = useState<Array<{path: string}>>([]);
+  const [outroFiles, setOutroFiles] = useState<Array<{path: string}>>([]);
   const [addWatermark, setAddWatermark] = useState(config.watermark.enabled);
   const [addCreditWatermark, setAddCreditWatermark] = useState(config.creditWatermark.enabled);
   const [creditText, setCreditText] = useState(config.creditWatermark.text);
@@ -153,6 +158,51 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     }
   };
 
+  const handlePickIntro = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [
+          { name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "avi", "m4v"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+      });
+      if (typeof selected === "string" && selected) {
+        setIntroPath(selected);
+      }
+    } catch (err) {
+      console.error("Failed to pick intro video", err);
+    }
+  };
+
+  const handlePickOutro = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [
+          { name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "avi", "m4v"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+      });
+      if (typeof selected === "string" && selected) {
+        setOutroPath(selected);
+      }
+    } catch (err) {
+      console.error("Failed to pick outro video", err);
+    }
+  };
+
+  const loadIntroOutroFiles = async () => {
+    try {
+      const intros = await invoke<{path: string}[]>("list_intro_outro", { mediaType: "intro" });
+      setIntroFiles(intros ?? []);
+      const outros = await invoke<{path: string}[]>("list_intro_outro", { mediaType: "outro" });
+      setOutroFiles(outros ?? []);
+    } catch (err) {
+      console.error("Failed to load intro/outro files", err);
+    }
+  };
+
   const applyPreset = (preset: StylePreset) => {
     const o = preset.options;
     setAddCaptions(o.addCaptions);
@@ -181,6 +231,8 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     } catch {
       /* ignore */
     }
+    // Load saved intro/outro files
+    loadIntroOutroFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -200,7 +252,9 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     onConfirm({
       addCaptions: addCaptions && captionsAvailable,
       addHook,
-      addIntroOutro,
+      addIntroOutro: addIntroOutro && (introPath !== null || outroPath !== null),
+      introPath: introPath || undefined,
+      outroPath: outroPath || undefined,
       addWatermark,
       addCreditWatermark,
       creditText: addCreditWatermark ? creditText : undefined,
@@ -570,6 +624,35 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                     </p>
                   </div>
                 )}
+
+              {/* Intro & Outro selection */}
+              {addIntroOutro && (
+                <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-bg-secondary)] space-y-3">
+                  <div className="flex items-center gap-2"><Film className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Intro Video</p></div>
+                  <div className="flex gap-2 items-center">
+                    <Button variant="outline" onClick={handlePickIntro} className="flex-1 text-sm">
+                      <FolderOpen className="w-4 h-4 mr-2" />
+                      {introPath ? "Change Intro" : "Pick Intro Video"}
+                    </Button>
+                    {introPath && (
+                      <span className="text-xs text-[var(--color-text-muted)] max-w-[150px] truncate">{introPath.split(/[\\/]/).pop()}</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[var(--color-text-muted)] italic">0.9s crossfade with main video</p>
+                  
+                  <div className="flex items-center gap-2"><Film className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Outro Video</p></div>
+                  <div className="flex gap-2 items-center">
+                    <Button variant="outline" onClick={handlePickOutro} className="flex-1 text-sm">\
+                      <FolderOpen className="w-4 h-4 mr-2" />\
+                      {outroPath ? "Change Outro" : "Pick Outro Video"}\
+                    </Button>
+                    {outroPath && (
+                      <span className="text-xs text-[var(--color-text-muted)] max-w-[150px] truncate">{outroPath.split(/[\\/]/).pop()}</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[var(--color-text-muted)] italic">0.9s crossfade with main video</p>
+                </div>
+              )}
 
               {addHook && (
                 <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-bg-secondary)] space-y-3">

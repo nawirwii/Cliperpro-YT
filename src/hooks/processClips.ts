@@ -35,6 +35,10 @@ export interface ProcessOptions {
   /** Source resolution cap for the download — 720p by default (smaller file). */
   downloadQuality?: DownloadQuality;
   splitScreen?: SplitScreenOptions;
+  /** Path to intro video file for prepend. */
+  introPath?: string;
+  /** Path to outro video file for append. */
+  outroPath?: string;
   /** GPU acceleration settings passed to the sidecar for hardware encoding. */
   gpuAcceleration?: {
     enabled: boolean;

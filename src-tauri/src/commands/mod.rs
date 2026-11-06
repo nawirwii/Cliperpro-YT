@@ -1410,3 +1410,46 @@ fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
         }
     }
 }
+
+#[tauri::command]
+pub fn list_intro_outro(app: tauri::AppHandle, media_type: String) -> Result<Vec<SavedIntroOutro>, String> {
+    let intro_outro_dir = cookies_dir(&app)?.join(&media_type);
+    if !intro_outro_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut files = Vec::new();
+    let entries = fs::read_dir(&intro_outro_dir).map_err(|e| format!("Failed to read {media_type} directory: {e}"))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        if size == 0 {
+            continue;
+        }
+        files.push(SavedIntroOutro {
+            path: path.to_string_lossy().to_string(),
+        });
+    }
+
+    Ok(files)
+}
+
+#[tauri::command]
+pub fn delete_intro_outro(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Ok(());
+    }
+    
+    // Safety: only allow deleting from intro_outro directory
+    let intro_outro_dir = cookies_dir(&app)?.join("intro_outro");
+    if !path.starts_with(&intro_outro_dir.to_string_lossy()) {
+        return Err("Refusing to delete: not in intro_outro directory".to_string());
+    }
+    
+    fs::remove_file(&p).map_err(|e| format!("Failed to delete file: {e}"))
+}
