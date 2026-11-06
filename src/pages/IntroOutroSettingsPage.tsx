@@ -6,7 +6,6 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { useConfigStore } from "@/stores/configStore";
 import { saveIntroOutro } from "@/hooks/appConfig";
-import type { IntroOutroSettings } from "@/hooks/appConfig";
 import { toast } from "sonner";
 
 export function IntroOutroSettingsPage() {

@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
-import { X, Film, AlignLeft, Quote, Image as ImageIcon, User, ScanFace, Square, Eye, Sparkles, Zap, MonitorPlay, FolderOpen, DownloadCloud, Volume2, Mic, Gamepad2, MoonStar, type LucideIcon, Trash2 } from "lucide-react";
+import { X, Film, AlignLeft, Quote, Image as ImageIcon, User, ScanFace, Square, Eye, Sparkles, Zap, MonitorPlay, FolderOpen, DownloadCloud, Volume2, Mic, Gamepad2, MoonStar, type LucideIcon } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
@@ -121,8 +120,6 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   const [addIntroOutro, setAddIntroOutro] = useState(config.introOutro.enabled);
   const [introPath, setIntroPath] = useState<string | null>(null);
   const [outroPath, setOutroPath] = useState<string | null>(null);
-  const [introFiles, setIntroFiles] = useState<Array<{path: string}>>([]);
-  const [outroFiles, setOutroFiles] = useState<Array<{path: string}>>([]);
   const [addWatermark, setAddWatermark] = useState(config.watermark.enabled);
   const [addCreditWatermark, setAddCreditWatermark] = useState(config.creditWatermark.enabled);
   const [creditText, setCreditText] = useState(config.creditWatermark.text);
@@ -192,17 +189,6 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     }
   };
 
-  const loadIntroOutroFiles = async () => {
-    try {
-      const intros = await invoke<{path: string}[]>("list_intro_outro", { mediaType: "intro" });
-      setIntroFiles(intros ?? []);
-      const outros = await invoke<{path: string}[]>("list_intro_outro", { mediaType: "outro" });
-      setOutroFiles(outros ?? []);
-    } catch (err) {
-      console.error("Failed to load intro/outro files", err);
-    }
-  };
-
   const applyPreset = (preset: StylePreset) => {
     const o = preset.options;
     setAddCaptions(o.addCaptions);
@@ -231,8 +217,6 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     } catch {
       /* ignore */
     }
-    // Load saved intro/outro files
-    loadIntroOutroFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
