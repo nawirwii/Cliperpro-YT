@@ -1,0 +1,46 @@
+name: Simple Frontend Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build frontend
+        run: npm run build
+      
+      - name: Create zip archive
+        run: |
+          cd dist
+          zip -r ../frontend-dist.zip .
+          cd ..
+      
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          gh release create $GITHUB_REF_NAME \
+            --title "Cliperpro v$VERSION" \
+            --notes "Frontend build for v$VERSION" \
+            --target main
+      
+      - name: Upload Release Asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload $GITHUB_REF_NAME frontend-dist.zip
