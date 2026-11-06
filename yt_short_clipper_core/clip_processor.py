@@ -3,9 +3,12 @@
 import json
 import re
 import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+
+LogFn = Callable[[str], None]
 
 from .video_processor import download_video_section, cut_video_section
 from .source_library import library_paths
@@ -15,8 +18,6 @@ from .hook_generator import generate_hook
 from .caption_generator import generate_captions_from_words
 from .srt_parser import parse_srt_segments, parse_timestamp
 from .watermark import apply_watermark
-
-LogFn = Callable[[str], None]
 
 
 def sanitize_clip_filename(title: str) -> str:

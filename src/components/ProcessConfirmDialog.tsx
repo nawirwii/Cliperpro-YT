@@ -115,8 +115,9 @@ const PRESET_ICONS: Record<string, LucideIcon> = {
 export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onConfirm, onCancel }: ProcessConfirmDialogProps) {
   const { config } = useConfigStore();
 
-  const [addCaptions, setAddCaptions] = useState(captionsAvailable);
+  const [addCaptions, setAddCaptions] = useState(true);
   const [addHook, setAddHook] = useState(true);
+  const [addIntroOutro, setAddIntroOutro] = useState(config.introOutro.enabled);
   const [addWatermark, setAddWatermark] = useState(config.watermark.enabled);
   const [addCreditWatermark, setAddCreditWatermark] = useState(config.creditWatermark.enabled);
   const [creditText, setCreditText] = useState(config.creditWatermark.text);
@@ -197,8 +198,9 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
 
   const handleConfirm = () => {
     onConfirm({
-      addCaptions,
+      addCaptions: addCaptions && captionsAvailable,
       addHook,
+      addIntroOutro,
       addWatermark,
       addCreditWatermark,
       creditText: addCreditWatermark ? creditText : undefined,
@@ -260,6 +262,14 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       icon: <ImageIcon className="w-5 h-5 text-[var(--color-accent)]" />,
       enabled: addWatermark,
       onToggle: (v: boolean) => { setAddWatermark(v); setActivePreset(null); },
+    },
+    {
+      key: "addIntroOutro",
+      label: "Intro & Outro",
+      description: "Prepend intro & append outro videos with 0.9s cross-fade",
+      icon: <Film className="w-5 h-5 text-[var(--color-accent)]" />,
+      enabled: addIntroOutro,
+      onToggle: (v: boolean) => { setAddIntroOutro(v); setActivePreset(null); },
     },
     {
       key: "addCreditWatermark",

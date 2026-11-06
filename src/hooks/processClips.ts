@@ -25,6 +25,7 @@ export interface ProcessOptions {
   addHook: boolean;
   addWatermark: boolean;
   addCreditWatermark: boolean;
+  addIntroOutro: boolean;
   creditText?: string;
   captionStyle?: string;
 

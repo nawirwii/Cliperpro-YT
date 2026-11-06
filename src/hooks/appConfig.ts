@@ -52,6 +52,12 @@ export interface ReplizSettings {
   secretKey: string;
 }
 
+export interface IntroOutroSettings {
+  enabled: boolean;
+  introPath: string;
+  outroPath: string;
+}
+
 export interface AppConfig {
   /** Single AI provider shared by highlight finding and title generation. */
   ai: AIProviderSettings;
@@ -65,6 +71,7 @@ export interface AppConfig {
   watermark: WatermarkSettings;
   creditWatermark: CreditWatermarkSettings;
   hookStyle: HookStyleSettings;
+  introOutro: IntroOutroSettings;
   repliz: ReplizSettings;
   /** Stable per-install UUID, generated on first run. Persists across updates. */
   installationId: string;
@@ -112,6 +119,11 @@ export const DEFAULT_CONFIG: AppConfig = {
     positionX: 0.5,
     positionY: 0.333,
     durationSeconds: 5,
+  },
+  introOutro: {
+    enabled: false,
+    introPath: "",
+    outroPath: "",
   },
   repliz: {
     accessKey: "",
@@ -188,6 +200,20 @@ export async function readWatermark(path: string): Promise<string> {
   return invoke<string>("read_watermark", { path });
 }
 
+export interface SavedIntroOutro {
+  path: string;
+}
+
+export async function saveIntroOutro(
+  fileName: string,
+  bytes: Uint8Array
+): Promise<SavedIntroOutro> {
+  return invoke<SavedIntroOutro>("save_intro_outro", {
+    fileName,
+    bytes: Array.from(bytes),
+  });
+}
+
 function mergeConfig(config: Partial<AppConfig> | undefined): AppConfig {
   // Migrate from the legacy per-task shape (aiProviders.highlightFinder) so
   // users who already configured a key don't have to re-enter it.
@@ -232,6 +258,10 @@ function mergeConfig(config: Partial<AppConfig> | undefined): AppConfig {
     hookStyle: {
       ...DEFAULT_CONFIG.hookStyle,
       ...config?.hookStyle,
+    },
+    introOutro: {
+      ...DEFAULT_CONFIG.introOutro,
+      ...config?.introOutro,
     },
     repliz: {
       ...DEFAULT_CONFIG.repliz,

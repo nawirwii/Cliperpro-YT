@@ -377,6 +377,35 @@ pub fn delete_session(session_dir: String) -> Result<(), String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SavedIntroOutro {
+    path: String,
+}
+
+#[tauri::command]
+pub fn save_intro_outro(
+    app: tauri::AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<SavedIntroOutro, String> {
+    let intro_outro_dir = cookies_dir(&app)?.join("intro_outro");
+    fs::create_dir_all(&intro_outro_dir)
+        .map_err(|e| format!("Failed to create intro_outro directory: {e}"))?;
+
+    let safe_name = PathBuf::from(&file_name)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "media.mp4".to_string());
+
+    let dest = intro_outro_dir.join(&safe_name);
+    fs::write(&dest, &bytes).map_err(|e| format!("Failed to save media: {e}"))?;
+
+    Ok(SavedIntroOutro {
+        path: dest.to_string_lossy().to_string(),
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SavedWatermark {
     path: String,
     data_url: String,

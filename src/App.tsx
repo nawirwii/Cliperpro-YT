@@ -10,6 +10,7 @@ import { AIModelsPage } from "@/pages/AIModelsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WatermarkSettingsPage } from "@/pages/WatermarkSettingsPage";
 import { CreditWatermarkSettingsPage } from "@/pages/CreditWatermarkSettingsPage";
+import { IntroOutroSettingsPage } from "@/pages/IntroOutroSettingsPage";
 import { HookStyleSettingsPage } from "@/pages/HookStyleSettingsPage";
 import { ProcessingClipsPage } from "@/pages/ProcessingClipsPage";
 import { ClipDetailPage } from "@/pages/ClipDetailPage";
@@ -44,6 +45,7 @@ function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/watermark" element={<WatermarkSettingsPage />} />
           <Route path="/settings/credit" element={<CreditWatermarkSettingsPage />} />
+          <Route path="/settings/intro-outro" element={<IntroOutroSettingsPage />} />
           <Route path="/settings/hook-style" element={<HookStyleSettingsPage />} />
           <Route path="/settings/repliz" element={<ReplizSettingsPage />} />
           <Route path="/settings/credits" element={<CreditsPage />} />

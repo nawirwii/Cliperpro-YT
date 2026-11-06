@@ -248,6 +248,25 @@ export function SettingsPage() {
             <ChevronRight className="w-4 h-4" />
           </Button>
         </SettingRow>
+
+        <SettingRow
+          title="Intro & Outro"
+          description={
+            config.introOutro.enabled
+              ? "Enabled — smooth transitions between clips"
+              : "Prepend an intro and append an outro to clips"
+          }
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/settings/intro-outro")}
+            className="gap-2"
+          >
+            Configure
+            <ChevronRight className="w-4 h-4" />
+          </Button>
+        </SettingRow>
       </SettingSection>
 
       <SettingSection
