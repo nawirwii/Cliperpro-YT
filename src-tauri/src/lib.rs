@@ -21,6 +21,8 @@ pub fn run() {
             commands::delete_session,
             commands::save_watermark,
             commands::save_intro_outro,
+            commands::list_intro_outro,
+            commands::delete_intro_outro,
             commands::read_watermark,
             commands::list_hook_fonts,
             commands::read_file_as_base64,
