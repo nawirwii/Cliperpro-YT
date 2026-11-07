@@ -4,11 +4,17 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
 LogFn = Callable[[str], None]
+
+# Hide ffmpeg's console window on Windows (CREATE_NO_WINDOW), like every
+# other ffmpeg call in this codebase. Without it the intro/outro probe and
+# render pop a visible black console window.
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 from .video_processor import download_video_section, cut_video_section
 from .source_library import library_paths
@@ -516,6 +522,7 @@ def process_selected_highlights(
                 intro_path=intro_path,
                 outro_path=outro_path,
                 log=lambda m: log(f"[{i}/{total}] {m}"),
+                gpu_config=gpu_config,
             )
             log(f"[{i}/{total}] Intro/Outro processing complete")
 
@@ -579,6 +586,7 @@ def _probe_video(path: str, ffmpeg_path: str) -> tuple[float, int | None, int | 
         probe = subprocess.run(
             [ffmpeg_path, "-hide_banner", "-i", str(path)],
             capture_output=True, text=True, timeout=30,
+            creationflags=_SUBPROCESS_FLAGS,
         )
     except Exception:
         return 0.0, None, None, None
@@ -618,6 +626,7 @@ def apply_intro_outro(
     intro_path: str | None,
     outro_path: str | None,
     log: LogFn,
+    gpu_config: dict[str, Any] | None = None,
 ) -> str:
     """Apply intro and/or outro video with 0.9s crossfade transition.
 
@@ -644,6 +653,19 @@ def apply_intro_outro(
         # (bundled ffmpeg first, then PATH) — a bare "ffmpeg" is not on
         # PATH in the portable install and fails with WinError 2.
         ffmpeg_path = get_ffmpeg_path()
+
+        # v2.0.133: encode with the same GPU encoder as every other step
+        # (h264_qsv on the Latitude 3400). The xfade filter itself still
+        # runs on CPU frames — xfade cannot process hardware frames — but
+        # the encode, the heavy part, moves to the GPU. Falls back to
+        # libx264 when GPU is off or unavailable.
+        from .gpu import build_video_enc_args
+        video_enc_args = build_video_enc_args(gpu_config)
+        enc_name = (gpu_config or {}).get("name") if gpu_config and gpu_config.get("available") else None
+        if enc_name:
+            log(f"Using GPU encoder: {enc_name} (preset={(gpu_config or {}).get('preset')})")
+        else:
+            log("Using CPU encoder: libx264")
 
         # Probe the clip (the normalization target) and the intro/outro
         # (the crossfade offsets). ffprobe is not shipped in the bundle,
@@ -702,6 +724,8 @@ def apply_intro_outro(
                 + f"[ma][2:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
+                *video_enc_args,
+                "-pix_fmt", "yuv420p",
                 output_path
             ]
             log("Building intro + outro with crossfade")
@@ -727,6 +751,8 @@ def apply_intro_outro(
                 + f"[0:a][1:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
+                *video_enc_args,
+                "-pix_fmt", "yuv420p",
                 output_path
             ]
             log("Building intro only")
@@ -752,6 +778,8 @@ def apply_intro_outro(
                 + f"[0:a][1:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
+                *video_enc_args,
+                "-pix_fmt", "yuv420p",
                 output_path
             ]
             log("Building outro only")
@@ -759,7 +787,10 @@ def apply_intro_outro(
             log("No intro or outro provided")
             return input_path
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300,
+            creationflags=_SUBPROCESS_FLAGS,
+        )
         if result.returncode != 0:
             log(f"FFmpeg error: {result.stderr}")
             return input_path
