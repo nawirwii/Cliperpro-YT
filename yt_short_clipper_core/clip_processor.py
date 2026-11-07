@@ -516,7 +516,7 @@ def process_selected_highlights(
         # Step 5.5: Intro/Outro (if enabled)
         if add_intro_outro and (intro_path or outro_path):
             intro_outro_output_path = str(temp_dir / f"with_intro_outro_{i:03d}.mp4")
-            video_path = apply_intro_outro(
+            intro_outro_result = apply_intro_outro(
                 input_path=video_path,
                 output_path=intro_outro_output_path,
                 intro_path=intro_path,
@@ -524,7 +524,15 @@ def process_selected_highlights(
                 log=lambda m: log(f"[{i}/{total}] {m}"),
                 gpu_config=gpu_config,
             )
-            log(f"[{i}/{total}] Intro/Outro processing complete")
+            if intro_outro_result == video_path:
+                # apply_intro_outro returns the input unchanged when the
+                # render fails (e.g. an intro file that cannot be opened).
+                # Say so plainly instead of logging success: the saved clip
+                # has no intro/outro in that case.
+                log(f"[{i}/{total}] WARNING: Intro/Outro FAILED — clip saved WITHOUT intro/outro (see FFmpeg error above)")
+            else:
+                video_path = intro_outro_result
+                log(f"[{i}/{total}] Intro/Outro processing complete")
 
         # Save the final video as output, named after the clip title
         clip_folder = clips_dir / f"clip_{highlight_index:03d}"
@@ -587,6 +595,10 @@ def _probe_video(path: str, ffmpeg_path: str) -> tuple[float, int | None, int | 
             [ffmpeg_path, "-hide_banner", "-i", str(path)],
             capture_output=True, text=True, timeout=30,
             creationflags=_SUBPROCESS_FLAGS,
+            # ffmpeg writes UTF-8; without this, Windows decodes stderr as
+            # cp1252 and every non-ASCII character in the log turns into
+            # mojibake (e.g. "…" shows up as "Ã¢â‚¬Â¦").
+            encoding="utf-8", errors="replace",
         )
     except Exception:
         return 0.0, None, None, None
@@ -790,6 +802,10 @@ def apply_intro_outro(
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300,
             creationflags=_SUBPROCESS_FLAGS,
+            # ffmpeg writes UTF-8; without this, Windows decodes stderr as
+            # cp1252 and every non-ASCII character in the log turns into
+            # mojibake (e.g. "…" shows up as "Ã¢â‚¬Â¦").
+            encoding="utf-8", errors="replace",
         )
         if result.returncode != 0:
             log(f"FFmpeg error: {result.stderr}")

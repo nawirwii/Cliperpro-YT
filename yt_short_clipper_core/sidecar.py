@@ -442,27 +442,47 @@ def _safe_stderr_write(msg: str) -> None:
         pass
 
 
+def _utf8_stdin():
+    """Return stdin as a UTF-8 text stream, or None when there is no pipe.
+
+    The Rust host writes every sidecar request as UTF-8 JSON, but on
+    Windows ``sys.stdin`` defaults to the ANSI code page (cp1252). Reading
+    the request through it corrupts every non-ASCII character — "…", "–",
+    "—", "é" — in file names, titles and paths before the request is even
+    parsed: an intro file named ``…`` arrives as ``â€š¦``, ffmpeg then
+    reports "No such file or directory", and the log shows the doubly
+    mangled ``Ã¢â‚¬Â¦``. Force UTF-8 so the bytes survive intact.
+    """
+    if sys.stdin is not None:
+        try:
+            sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+            return sys.stdin
+        except Exception:
+            pass
+    import io as _io
+
+    try:
+        return _io.TextIOWrapper(
+            os.fdopen(0, "rb", buffering=0),
+            encoding="utf-8",
+            errors="replace",
+            line_buffering=True,
+        )
+    except OSError:
+        # No pipe on fd 0 at all (sidecar launched standalone, e.g. by
+        # double-clicking the exe).  There is nothing to read; exit
+        # quietly instead of raising a confusing traceback.
+        _safe_stderr_write("[sidecar] no stdin available — exiting\n")
+        return None
+
+
 def run_loop() -> None:
     # PyInstaller windowed mode (console=False) sets sys.stdin = None even
     # when the parent Rust process passes a pipe on fd 0.  Read from the raw
     # file descriptor directly so the stdin protocol still works.
-    if sys.stdin is None:
-        import io as _io
-
-        try:
-            _raw_stdin = _io.TextIOWrapper(
-                os.fdopen(0, "rb", buffering=0),
-                encoding="utf-8",
-                line_buffering=True,
-            )
-        except OSError:
-            # No pipe on fd 0 at all (sidecar launched standalone, e.g. by
-            # double-clicking the exe).  There is nothing to read; exit
-            # quietly instead of raising a confusing traceback.
-            _safe_stderr_write("[sidecar] no stdin available — exiting\n")
-            return
-    else:
-        _raw_stdin = sys.stdin
+    _raw_stdin = _utf8_stdin()
+    if _raw_stdin is None:
+        return
 
     for line in _raw_stdin:
         line = line.strip()
