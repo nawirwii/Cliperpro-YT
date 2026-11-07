@@ -9,6 +9,8 @@ interface SessionState {
   selectedIndices: Set<number>;
   setSession: (session: SessionData, origin?: SessionOrigin) => void;
   clearSession: () => void;
+  /** Mark highlight indices as processed (rendered) for the given session. */
+  markProcessed: (sessionDir: string, indices: number[]) => void;
   toggleSelected: (index: number) => void;
   selectAll: () => void;
   deselectAll: () => void;
@@ -28,6 +30,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }),
 
   clearSession: () => set({ session: null, selectedIndices: new Set() }),
+
+  // v2.0.132: record rendered clips so the highlights page shows the
+  // "Clip ready" footer (View + open folder button). Guarded by
+  // sessionDir so a stale store session is never marked.
+  markProcessed: (sessionDir, indices) =>
+    set((state) => {
+      const session = state.session;
+      if (!session || session.session_dir !== sessionDir || indices.length === 0) return {};
+      const next = new Set(session.processed_highlights ?? []);
+      indices.forEach((i) => next.add(i));
+      return {
+        session: {
+          ...session,
+          processed_highlights: [...next].sort((a, b) => a - b),
+        },
+      };
+    }),
 
   toggleSelected: (index) =>
     set((state) => {
