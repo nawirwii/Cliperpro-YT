@@ -18,6 +18,7 @@ from .hook_generator import generate_hook
 from .caption_generator import generate_captions_from_words
 from .srt_parser import parse_srt_segments, parse_timestamp
 from .watermark import apply_watermark
+from .helpers import get_ffmpeg_path
 
 
 def sanitize_clip_filename(title: str) -> str:
@@ -553,11 +554,15 @@ def apply_intro_outro(
     """
     try:
         crossfade_dur = 0.9
-        
+        # Resolve ffmpeg the same way as every other step in this codebase
+        # (bundled ffmpeg first, then PATH) — a bare "ffmpeg" is not on
+        # PATH in the portable install and fails with WinError 2.
+        ffmpeg_path = get_ffmpeg_path()
+
         if intro_path and outro_path:
             # Both intro and outro: concat with crossfade at both ends
             cmd = [
-                "ffmpeg", "-y",
+                ffmpeg_path, "-y",
                 "-i", intro_path,
                 "-i", input_path,
                 "-i", outro_path,
@@ -575,7 +580,7 @@ def apply_intro_outro(
         elif intro_path:
             # Intro only
             cmd = [
-                "ffmpeg", "-y",
+                ffmpeg_path, "-y",
                 "-i", intro_path,
                 "-i", input_path,
                 "-filter_complex",
@@ -590,7 +595,7 @@ def apply_intro_outro(
         elif outro_path:
             # Outro only
             cmd = [
-                "ffmpeg", "-y",
+                ffmpeg_path, "-y",
                 "-i", input_path,
                 "-i", outro_path,
                 "-filter_complex",
