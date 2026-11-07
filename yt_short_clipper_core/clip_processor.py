@@ -533,6 +533,51 @@ def process_selected_highlights(
     }
 
 
+def _probe_video(path: str, ffmpeg_path: str) -> tuple[float, int | None, int | None, float | None]:
+    """Probe one video file with ``ffmpeg -i`` (no ffprobe in the bundle).
+
+    Parses ``Duration:`` and the first ``Video:`` stream line from stderr,
+    the same way the rest of the codebase probes media. Returns
+    ``(duration_seconds, width, height, fps)``; any value that cannot be
+    read comes back as 0.0 / None. Never raises.
+    """
+    try:
+        probe = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-i", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception:
+        return 0.0, None, None, None
+    stderr = probe.stderr or ""
+    duration = 0.0
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", stderr)
+    if m:
+        h, mi, s = m.groups()
+        try:
+            duration = int(h) * 3600 + int(mi) * 60 + float(s)
+        except ValueError:
+            duration = 0.0
+    width = height = None
+    fps = None
+    for line in stderr.splitlines():
+        if ": Video:" not in line:
+            continue
+        vm = re.search(r",\s*(\d+)x(\d+)[,\s]", line)
+        if vm:
+            try:
+                width, height = int(vm.group(1)), int(vm.group(2))
+            except ValueError:
+                width = height = None
+        fm = re.search(r"(\d+(?:\.\d+)?)\s*fps", line)
+        if fm:
+            try:
+                fps = float(fm.group(1))
+            except ValueError:
+                fps = None
+        break
+    return duration, width, height, fps
+
+
 def apply_intro_outro(
     input_path: str,
     output_path: str,
@@ -541,14 +586,21 @@ def apply_intro_outro(
     log: LogFn,
 ) -> str:
     """Apply intro and/or outro video with 0.9s crossfade transition.
-    
+
+    Every video input is normalized to the clip's resolution/fps first
+    (xfade requires identical size, fps and pixel format on both sides,
+    else it fails with -22 EINVAL), and each fade is placed at the
+    junction (end of the first video) instead of offset 0. If probing
+    fails, falls back to the previous behaviour (no normalization,
+    offset 0) so a working case never gets worse.
+
     Args:
         input_path: Path to the clip video
         output_path: Path for the output video with intro/outro
         intro_path: Path to intro video (optional)
         outro_path: Path to outro video (optional)
         log: Logging function
-    
+
     Returns:
         Path to the output video (or input_path on failure)
     """
@@ -559,19 +611,61 @@ def apply_intro_outro(
         # PATH in the portable install and fails with WinError 2.
         ffmpeg_path = get_ffmpeg_path()
 
+        # Probe the clip (the normalization target) and the intro/outro
+        # (the crossfade offsets). ffprobe is not shipped in the bundle,
+        # so this parses `ffmpeg -i` stderr like the rest of the codebase.
+        clip_dur, clip_w, clip_h, clip_fps = _probe_video(input_path, ffmpeg_path)
+        intro_dur = outro_dur = 0.0
+        if intro_path:
+            intro_dur, _, _, _ = _probe_video(intro_path, ffmpeg_path)
+        if outro_path:
+            outro_dur, _, _, _ = _probe_video(outro_path, ffmpeg_path)
+
+        # Normalize every input to the clip's resolution/fps when we know
+        # them. If probing failed, fall back to the previous behaviour.
+        normalized = bool(clip_w and clip_h and clip_fps)
+        if normalized:
+            tw, th, tfps = clip_w, clip_h, clip_fps
+
+            def vprep(idx: int, label: str) -> str:
+                return (
+                    f"[{idx}:v]scale={tw}:{th}:force_original_aspect_ratio=increase,"
+                    f"crop={tw}:{th},fps={tfps:g},format=yuv420p,setsar=1[{label}];"
+                )
+        else:
+            def vprep(idx: int, label: str) -> str:
+                return f"[{idx}:v]format=yuv420p[{label}];"
+
+        # Offset puts the fade at the junction (end of the first video),
+        # not at offset 0 (the first 0.9s). Unknown durations fall back to 0.
+        def off(dur: float) -> float:
+            return max(0.0, dur - crossfade_dur)
+
         if intro_path and outro_path:
             # Both intro and outro: concat with crossfade at both ends
+            if normalized:
+                video = (
+                    vprep(0, "v_intro")
+                    + vprep(1, "v_clip")
+                    + vprep(2, "v_outro")
+                    + f"[v_intro][v_clip]xfade=transition=fade:duration={crossfade_dur}:offset={off(intro_dur):g}[v0];"
+                    + f"[v0][v_outro]xfade=transition=fade:duration={crossfade_dur}:offset={off(intro_dur + clip_dur - crossfade_dur):g}[v];"
+                )
+            else:
+                video = (
+                    "[0:v]format=yuv420p[v_intro];"
+                    f"[v_intro][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v0];"
+                    f"[v0][2:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
+                )
             cmd = [
                 ffmpeg_path, "-y",
                 "-i", intro_path,
                 "-i", input_path,
                 "-i", outro_path,
                 "-filter_complex",
-                f"[0:v]format=yuv420p[v_intro];"
-                f"[v_intro][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v0];"
-                f"[v0][2:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
-                f"[0:a][1:a]acrossfade=d={crossfade_dur}[ma];"
-                f"[ma][2:a]acrossfade=d={crossfade_dur}[a]",
+                video
+                + f"[0:a][1:a]acrossfade=d={crossfade_dur}[ma];"
+                + f"[ma][2:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
                 output_path
@@ -579,14 +673,24 @@ def apply_intro_outro(
             log("Building intro + outro with crossfade")
         elif intro_path:
             # Intro only
+            if normalized:
+                video = (
+                    vprep(0, "v_intro")
+                    + vprep(1, "v_clip")
+                    + f"[v_intro][v_clip]xfade=transition=fade:duration={crossfade_dur}:offset={off(intro_dur):g}[v];"
+                )
+            else:
+                video = (
+                    "[0:v]format=yuv420p[v0];"
+                    f"[v0][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
+                )
             cmd = [
                 ffmpeg_path, "-y",
                 "-i", intro_path,
                 "-i", input_path,
                 "-filter_complex",
-                f"[0:v]format=yuv420p[v0];"
-                f"[v0][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
-                f"[0:a][1:a]acrossfade=d={crossfade_dur}[a]",
+                video
+                + f"[0:a][1:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
                 output_path
@@ -594,14 +698,24 @@ def apply_intro_outro(
             log("Building intro only")
         elif outro_path:
             # Outro only
+            if normalized:
+                video = (
+                    vprep(0, "v_clip")
+                    + vprep(1, "v_outro")
+                    + f"[v_clip][v_outro]xfade=transition=fade:duration={crossfade_dur}:offset={off(clip_dur):g}[v];"
+                )
+            else:
+                video = (
+                    "[0:v]format=yuv420p[v0];"
+                    f"[v0][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
+                )
             cmd = [
                 ffmpeg_path, "-y",
                 "-i", input_path,
                 "-i", outro_path,
                 "-filter_complex",
-                f"[0:v]format=yuv420p[v0];"
-                f"[v0][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
-                f"[0:a][1:a]acrossfade=d={crossfade_dur}[a]",
+                video
+                + f"[0:a][1:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
                 output_path
@@ -610,12 +724,12 @@ def apply_intro_outro(
         else:
             log("No intro or outro provided")
             return input_path
-        
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             log(f"FFmpeg error: {result.stderr}")
             return input_path
-        
+
         log("Intro/outro processing complete")
         return output_path
     except Exception as e:
