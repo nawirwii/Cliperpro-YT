@@ -563,10 +563,9 @@ def apply_intro_outro(
                 "-i", outro_path,
                 "-filter_complex",
                 f"[0:v]format=yuv420p[v_intro];"
-                f"[v_intro][1:v]xfade=transition=fade:d={crossfade_dur}:offset=0[v0];"
-                f"[v0][2:v]xfade=transition=fade:d={crossfade_dur}:offset=0[v];"
-                f"[0:a]apad[ia];"
-                f"[ia][1:a]acrossfade=d={crossfade_dur}[ma];"
+                f"[v_intro][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v0];"
+                f"[v0][2:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
+                f"[0:a][1:a]acrossfade=d={crossfade_dur}[ma];"
                 f"[ma][2:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
@@ -581,9 +580,8 @@ def apply_intro_outro(
                 "-i", input_path,
                 "-filter_complex",
                 f"[0:v]format=yuv420p[v0];"
-                f"[v0][1:v]xfade=transition=fade:d={crossfade_dur}:offset=0[v];"
-                f"[0:a]apad,apad[ia];"
-                f"[ia][1:a]acrossfade=d={crossfade_dur}[a]",
+                f"[v0][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
+                f"[0:a][1:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
                 output_path
@@ -597,9 +595,8 @@ def apply_intro_outro(
                 "-i", outro_path,
                 "-filter_complex",
                 f"[0:v]format=yuv420p[v0];"
-                f"[v0][1:v]xfade=transition=fade:d={crossfade_dur}:offset=0[v];"
-                f"[0:a]apad,apad[oa];"
-                f"[oa][1:a]acrossfade=d={crossfade_dur}[a]",
+                f"[v0][1:v]xfade=transition=fade:duration={crossfade_dur}:offset=0[v];"
+                f"[0:a][1:a]acrossfade=d={crossfade_dur}[a]",
                 "-map", "[v]",
                 "-map", "[a]",
                 output_path
