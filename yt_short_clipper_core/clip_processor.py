@@ -97,6 +97,35 @@ def _load_session_channel(session_path: Path) -> str:
         return ""
 
 
+def _mark_processed_highlights(session_path: Path, indices: list[int], log: LogFn) -> None:
+    """Record freshly rendered clips in ``session_data.json``.
+
+    The highlights page only shows the "Clip ready" footer (View + open
+    folder button) for indices listed in ``processed_highlights`` — but
+    nothing ever wrote that field, so the footer could never appear. This
+    merges the new indices into the saved session file (dedupe + sorted)
+    so the mark survives app restarts and Library loads. Best-effort: a
+    missing or unreadable session file must never break the render.
+    """
+    if not indices:
+        return
+    try:
+        data_file = session_path / "session_data.json"
+        if not data_file.exists():
+            log("Session data file not found — processed clips not recorded")
+            return
+        with open(data_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        existing = data.get("processed_highlights") or []
+        merged = sorted({i for i in existing if isinstance(i, int)} | set(indices))
+        data["processed_highlights"] = merged
+        with open(data_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        log(f"Marked {len(indices)} clip(s) as processed in session data")
+    except Exception as exc:
+        log(f"Warning: could not record processed clips in session data: {exc}")
+
+
 def _resolve_credit_text(
     credit_config: dict[str, Any] | None,
     options: dict[str, Any],
@@ -523,6 +552,11 @@ def process_selected_highlights(
             "title": h.get("title", ""),
             "skipped": False,
         })
+
+    # v2.0.132: record the freshly rendered clips so the highlights page
+    # can show the "Clip ready" footer (View + open folder button).
+    done_indices = [r["clip_index"] for r in results if not r.get("skipped")]
+    _mark_processed_highlights(session_path, done_indices, log)
 
     log(f"Processed {len(results)} clip(s)")
     return {

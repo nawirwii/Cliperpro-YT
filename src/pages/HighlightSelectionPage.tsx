@@ -334,6 +334,7 @@ function HighlightCard({ index, highlight, selected, processed, sessionDir, onTo
                   className="h-6 px-2 gap-1 text-xs text-[var(--color-text-muted)]"
                 >
                   <FolderOpen className="w-3.5 h-3.5" />
+                  Open
                 </Button>
               </span>
             )}
