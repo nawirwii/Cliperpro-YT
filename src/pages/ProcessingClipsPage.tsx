@@ -17,6 +17,7 @@ import { logClipSuccess, type ClipSuccessFormat } from "@/hooks/successLog";
 import { useConfigStore } from "@/stores/configStore";
 import { useAppStore } from "@/stores/appStore";
 import { useProcessingClipsStore } from "@/stores/processingClipsStore";
+import { useSessionStore } from "@/stores/sessionStore";
 import { formatLogTime } from "@/utils/format";
 import { cn } from "@/lib/utils";
 
@@ -222,6 +223,16 @@ export function ProcessingClipsPage() {
         const dur = durationByIndex.get(r?.clip_index ?? -1);
         if (typeof dur !== "number" || dur <= 0) continue;
         void logClipSuccess({ duration: dur, format });
+      }
+
+      // v2.0.132: mark the freshly rendered clips as processed in the
+      // session store so the highlights page shows the "Clip ready"
+      // footer (View + open folder button).
+      const doneIndices = processed
+        .filter((r) => !r?.skipped && typeof r?.clip_index === "number")
+        .map((r) => r.clip_index as number);
+      if (doneIndices.length > 0) {
+        useSessionStore.getState().markProcessed(sessionDir, doneIndices);
       }
 
       const st = useProcessingClipsStore.getState();
