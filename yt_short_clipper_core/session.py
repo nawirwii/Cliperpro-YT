@@ -162,6 +162,10 @@ def find_highlights_only(
         output_language=output_language,
         subtitle_language=subtitle_language,
         log=log,
+        # v2.0.137: the real video length (seconds, or None when yt-dlp did
+        # not report it). Validates highlight timestamps before the user
+        # picks clips, and is shown to the model in the video context.
+        duration=video_info.get("duration"),
     )
 
     log(f"Found {len(highlights)} valid highlights")
@@ -243,6 +247,9 @@ def _ai_highlights(
         user_direction=effective_direction,
         output_language=resolved_language,
         log=log,
+        # v2.0.137: the real video length, so timestamps past the end are
+        # dropped during validation instead of failing at cut time.
+        video_duration=duration,
     )
 
     if not highlights:

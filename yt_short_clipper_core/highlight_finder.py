@@ -68,6 +68,52 @@ def _clock_to_seconds(value: str) -> float:
     return float(parts[0] * 3600 + parts[1] * 60 + parts[2])
 
 
+def _seconds_to_clock(seconds: float) -> str:
+    """620.0 -> "00:10:20", 3155.0 -> "00:52:35" (HH:MM:SS, no millis)."""
+    total = max(0, int(seconds))
+    return f"{total // 3600:02d}:{(total % 3600) // 60:02d}:{total % 60:02d}"
+
+
+def _seconds_to_timestamp(seconds: float) -> str:
+    """620.0 -> "00:10:20,000" (the HH:MM:SS,mmm highlight format)."""
+    total_ms = max(0, int(round(seconds * 1000)))
+    ms = total_ms % 1000
+    total = total_ms // 1000
+    return f"{total // 3600:02d}:{(total % 3600) // 60:02d}:{total % 60:02d},{ms:03d}"
+
+
+def build_range_note(user_direction: str | None) -> str:
+    """Unambiguous translation of the user's clock ranges for the prompt.
+
+    v2.0.137: the model reads direction times like "10:20" and writes them
+    back as HH:MM:SS ("10:20:00" = 10 hours 20 minutes) even though the user
+    meant 10 minutes 20 seconds — which then fails at cut time because the
+    timestamp sits past the end of the video. Spelling each range out as
+    HH:MM:SS plus plain seconds removes the ambiguity.
+    """
+    matches = _TIME_RANGE_RE.findall(sanitize_direction(user_direction))
+    if not matches:
+        return ""
+    lines = [
+        "NOTE ON THE CLOCK RANGES IN THE DIRECTION: the user wrote times like "
+        '"10:20" meaning MINUTES:SECONDS, never hours:minutes. Each range below '
+        "is spelled out in HH:MM:SS and in plain seconds — use exactly those "
+        "values. Always write timestamps as HH:MM:SS,mmm with hours 00 for "
+        "anything under one hour. Never write \"10:20:00\" for minute 10, "
+        "second 20.",
+    ]
+    for raw_start, raw_end in matches:
+        start = _clock_to_seconds(raw_start)
+        end = _clock_to_seconds(raw_end)
+        if end <= start:
+            continue
+        lines.append(
+            f'"{raw_start} to {raw_end}" = {_seconds_to_clock(start)} to '
+            f"{_seconds_to_clock(end)} (seconds {start:g} to {end:g})."
+        )
+    return "\n".join(lines)
+
+
 def parse_requested_ranges(user_direction: str | None) -> list[tuple[float, float]]:
     """Clock ranges the user spelled out, as (start, end) seconds pairs."""
     ranges: list[tuple[float, float]] = []
@@ -202,14 +248,33 @@ def find_highlights(
     user_direction: str | None = None,
     output_language: str | None = None,
     log: LogFn | None = None,
+    video_duration: float | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Call the AI model and return (highlights, token_usage).
 
     Each highlight has: start_time, end_time, title, description,
     virality_score, hook_text, duration_seconds.
+
+    video_duration is the real video length in seconds (None when unknown).
+    It is shown to the model in the video context and used to drop highlight
+    timestamps that sit past the end of the video (v2.0.137).
     """
     log = log or debug_log
     system_prompt = system_prompt or DEFAULT_HIGHLIGHT_PROMPT
+    try:
+        video_duration = float(video_duration) if video_duration is not None else None
+    except (TypeError, ValueError):
+        video_duration = None
+    if video_duration is None and video_info:
+        # Fall back to the duration the scan phase stored in video_info.
+        try:
+            video_duration = (
+                float(video_info.get("duration"))
+                if video_info.get("duration") is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            video_duration = None
 
     # Request a few extra clips so we can drop invalid-duration ones
     request_clips = num_clips + 3
@@ -222,6 +287,12 @@ def find_highlights(
             f"- Channel: {video_info.get('channel', 'Unknown')}\n"
             f"- Deskripsi: {(video_info.get('description', '') or '')[:500]}"
         )
+        if video_duration is not None and video_duration > 0:
+            video_context += (
+                f"\n- Durasi: {_seconds_to_clock(video_duration)} "
+                f"({video_duration:g} detik). The video ends at this timestamp — "
+                "never return a highlight that starts at or past it."
+            )
 
     direction_block = build_direction_block(user_direction)
     has_placeholder = "{user_direction}" in system_prompt
@@ -239,6 +310,12 @@ def find_highlights(
         # that is the only copy it will have.
         tail = build_direction_reminder(user_direction) if has_placeholder else direction_block
         prompt = prompt.rstrip() + "\n" + tail
+        # v2.0.137: spell the user's clock ranges out in HH:MM:SS + seconds
+        # right before the JSON, so "10:20" can no longer be misread as
+        # 10 hours 20 minutes.
+        range_note = build_range_note(user_direction)
+        if range_note:
+            prompt = prompt.rstrip() + "\n\n" + range_note
 
     if temperature is None:
         temperature = DIRECTED_TEMPERATURE if direction_block else DEFAULT_TEMPERATURE
@@ -343,6 +420,7 @@ def find_highlights(
         log,
         parse_requested_ranges(user_direction),
         parse_requested_duration_range(user_direction),
+        video_duration=video_duration,
     )
     return valid, token_usage
 
@@ -411,22 +489,58 @@ def _validate_highlights(
     log: LogFn,
     requested_ranges: list[tuple[float, float]] | None = None,
     requested_duration: tuple[float, float] | None = None,
+    video_duration: float | None = None,
 ) -> list[dict[str, Any]]:
+    """Drop highlights that cannot be cut, keep the rest in model order.
+
+    v2.0.137: when the real video length is known, a highlight that starts
+    at or past the end of the video is dropped here — during the scan — with
+    a log line the user can act on, instead of failing at cut time after the
+    whole video was downloaded. A highlight whose end merely runs past the
+    video end is clamped to the end and re-checked for length.
+    """
     valid: list[dict[str, Any]] = []
     requested_ranges = requested_ranges or []
     min_duration, max_duration = requested_duration or (58.0, 120.0)
     duration_label = f"{min_duration:g}-{max_duration:g}s"
+    try:
+        video_duration = float(video_duration) if video_duration is not None else None
+    except (TypeError, ValueError):
+        video_duration = None
+    have_video_end = video_duration is not None and video_duration > 0
 
     for h in highlights:
         if "reason" in h and "description" not in h:
             h["description"] = h.pop("reason")
 
         try:
-            duration = parse_timestamp(h["end_time"]) - parse_timestamp(h["start_time"])
+            start_s = parse_timestamp(h["start_time"])
+            end_s = parse_timestamp(h["end_time"])
         except (KeyError, ValueError, IndexError):
             log(f"Skipping highlight with invalid timestamps: {h.get('title', 'Unknown')}")
             continue
 
+        title = h.get("title", "Untitled")
+
+        if have_video_end:
+            assert video_duration is not None  # narrowed by have_video_end
+            if start_s >= video_duration:
+                log(
+                    f"Skip {title} — starts at {_seconds_to_clock(start_s)}, "
+                    f"past the end of the video ({_seconds_to_clock(video_duration)}). "
+                    "The AI returned a timestamp outside the video; re-scan "
+                    "with a clearer direction or another model."
+                )
+                continue
+            if end_s > video_duration:
+                h["end_time"] = _seconds_to_timestamp(video_duration)
+                log(
+                    f"⚠️ {title} end clamped to the end of the video "
+                    f"({_seconds_to_clock(video_duration)})."
+                )
+                end_s = video_duration
+
+        duration = end_s - start_s
         h["duration_seconds"] = round(duration, 1)
 
         if "virality_score" not in h:
@@ -434,10 +548,7 @@ def _validate_highlights(
         if "description" not in h:
             h["description"] = h.get("title", "No description")
 
-        title = h.get("title", "Untitled")
-        exact = _matches_requested_range(
-            parse_timestamp(h["start_time"]), parse_timestamp(h["end_time"]), requested_ranges
-        )
+        exact = _matches_requested_range(start_s, end_s, requested_ranges)
 
         in_duration_range = min_duration <= duration <= max_duration
         exact_range_exempt = exact and requested_duration is None
