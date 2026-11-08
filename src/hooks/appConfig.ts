@@ -1,4 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  ReframeMode,
+  CenteredBackground,
+  DownloadQuality,
+} from "@/hooks/processClips";
 
 export interface AIProviderSettings {
   baseUrl: string;
@@ -58,6 +63,34 @@ export interface IntroOutroSettings {
   outroPath: string;
 }
 
+/**
+ * Last-used Process Clips dialog choices (v2.0.136). The dialog restores
+ * these when it opens, so its inputs survive an app restart exactly as
+ * they were left. The four toggle/text fields that also live in the
+ * settings pages (intro/outro enabled, watermark enabled, credit enabled
+ * + text) are NOT duplicated here — the dialog writes those straight back
+ * into their settings sections, keeping one source of truth.
+ */
+export interface ProcessDialogSettings {
+  addCaptions: boolean;
+  addHook: boolean;
+  /** Per-render intro pick (NOT the settings-page default file). */
+  introPath: string | null;
+  /** Per-render outro pick (NOT the settings-page default file). */
+  outroPath: string | null;
+  crossfadeDuration: number;
+  reframeMode: ReframeMode;
+  captionStyle: string;
+  hookStyle: string;
+  centeredBackground: CenteredBackground;
+  downloadQuality: DownloadQuality;
+  splitEnabled: boolean;
+  /** Absolute path to the bottom (webcam / narasumber) video. */
+  splitWebcamPath: string;
+  splitMainVolume: number;
+  splitSecondVolume: number;
+}
+
 export interface AppConfig {
   /** Single AI provider shared by highlight finding and title generation. */
   ai: AIProviderSettings;
@@ -73,6 +106,8 @@ export interface AppConfig {
   hookStyle: HookStyleSettings;
   introOutro: IntroOutroSettings;
   repliz: ReplizSettings;
+  /** Last-used Process Clips dialog choices (see ProcessDialogSettings). */
+  processDialog: ProcessDialogSettings;
   /** Stable per-install UUID, generated on first run. Persists across updates. */
   installationId: string;
 }
@@ -128,6 +163,22 @@ export const DEFAULT_CONFIG: AppConfig = {
   repliz: {
     accessKey: "",
     secretKey: "",
+  },
+  processDialog: {
+    addCaptions: true,
+    addHook: true,
+    introPath: null,
+    outroPath: null,
+    crossfadeDuration: 0.9,
+    reframeMode: "face",
+    captionStyle: "Creator Pop",
+    hookStyle: "Clean White Box",
+    centeredBackground: "black",
+    downloadQuality: "720p",
+    splitEnabled: false,
+    splitWebcamPath: "",
+    splitMainVolume: 100,
+    splitSecondVolume: 100,
   },
   installationId: "",
 };
@@ -267,6 +318,30 @@ function mergeConfig(config: Partial<AppConfig> | undefined): AppConfig {
       ...DEFAULT_CONFIG.repliz,
       ...config?.repliz,
     },
+    processDialog: (() => {
+      const pd = {
+        ...DEFAULT_CONFIG.processDialog,
+        ...config?.processDialog,
+      };
+      // Guard the numeric fields against hand-edited or stale values so a
+      // bad number can never leave the dialog in an unusable state.
+      pd.crossfadeDuration = clampNumber(pd.crossfadeDuration, 0.1, 1.0, 0.9);
+      pd.splitMainVolume = clampNumber(pd.splitMainVolume, 0, 100, 100);
+      pd.splitSecondVolume = clampNumber(pd.splitSecondVolume, 0, 100, 100);
+      return pd;
+    })(),
     installationId: config?.installationId ?? DEFAULT_CONFIG.installationId,
   };
+}
+
+/** Non-numeric or out-of-range input falls back to `fallback`. */
+function clampNumber(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : fallback;
 }
