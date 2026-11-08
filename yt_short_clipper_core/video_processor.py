@@ -616,8 +616,8 @@ def cut_video_section(
         raise RuntimeError(
             f"Cannot cut {start_time} -> {end_time}: the source video is only "
             f"{_ffmpeg_timestamp(duration)} long. The highlight timestamp is "
-            f"past the end of the file -- re-scan the local video so the "
-            f"transcript matches this file."
+            f"past the end of the video -- re-scan the video so the highlights "
+            f"are picked from this video's transcript, not another one."
         )
     if duration > 0 and end_s is not None and end_s > duration + 1.0:
         log(

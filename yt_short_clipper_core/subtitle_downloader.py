@@ -213,6 +213,12 @@ def download_subtitle_only(
                     "title": info.get("title", ""),
                     "description": (info.get("description", "") or "")[:2000],
                     "channel": info.get("channel", ""),
+                    # v2.0.137: the video length in seconds (None when yt-dlp
+                    # does not report it). The scan phase validates AI
+                    # highlight timestamps against it, so a timestamp past
+                    # the end of the video is dropped before the user picks
+                    # clips instead of failing at cut time after downloading.
+                    "duration": info.get("duration"),
                 }
     except Exception as e:
         last_error = str(e)
