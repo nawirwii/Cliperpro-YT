@@ -39,6 +39,8 @@ export interface ProcessOptions {
   introPath?: string;
   /** Path to outro video file for append. */
   outroPath?: string;
+  /** Crossfade duration in seconds for intro/outro transitions, 0.1–1.0. Default 0.9. */
+  crossfadeDuration?: number;
   /** GPU acceleration settings passed to the sidecar for hardware encoding. */
   gpuAcceleration?: {
     enabled: boolean;

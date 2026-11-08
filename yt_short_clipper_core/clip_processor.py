@@ -263,6 +263,10 @@ def process_selected_highlights(
     add_intro_outro = options.get("addIntroOutro", False)
     intro_path = options.get("introPath")
     outro_path = options.get("outroPath")
+    try:
+        crossfade_duration = float(options.get("crossfadeDuration", 0.9))
+    except (TypeError, ValueError):
+        crossfade_duration = 0.9
     caption_style = options.get("captionStyle", "Creator Pop")
 
 
@@ -523,6 +527,7 @@ def process_selected_highlights(
                 outro_path=outro_path,
                 log=lambda m: log(f"[{i}/{total}] {m}"),
                 gpu_config=gpu_config,
+                crossfade_duration=crossfade_duration,
             )
             if intro_outro_result == video_path:
                 # apply_intro_outro returns the input unchanged when the
@@ -639,8 +644,10 @@ def apply_intro_outro(
     outro_path: str | None,
     log: LogFn,
     gpu_config: dict[str, Any] | None = None,
+    crossfade_duration: float = 0.9,
 ) -> str:
-    """Apply intro and/or outro video with 0.9s crossfade transition.
+    """Apply intro and/or outro video with a crossfade transition
+    (default 0.9s; the dialog slider allows 0.1–1.0s).
 
     Every video input is normalized to the clip's resolution/fps first
     (xfade requires identical size, fps and pixel format on both sides,
@@ -655,12 +662,18 @@ def apply_intro_outro(
         intro_path: Path to intro video (optional)
         outro_path: Path to outro video (optional)
         log: Logging function
+        crossfade_duration: Crossfade length in seconds (0.1–1.0,
+            clamped; default 0.9)
 
     Returns:
         Path to the output video (or input_path on failure)
     """
     try:
-        crossfade_dur = 0.9
+        try:
+            crossfade_dur = float(crossfade_duration)
+        except (TypeError, ValueError):
+            crossfade_dur = 0.9
+        crossfade_dur = min(1.0, max(0.1, crossfade_dur))
         # Resolve ffmpeg the same way as every other step in this codebase
         # (bundled ffmpeg first, then PATH) — a bare "ffmpeg" is not on
         # PATH in the portable install and fails with WinError 2.

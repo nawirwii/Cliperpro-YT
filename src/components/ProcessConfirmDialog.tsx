@@ -120,6 +120,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   const [addIntroOutro, setAddIntroOutro] = useState(config.introOutro.enabled);
   const [introPath, setIntroPath] = useState<string | null>(null);
   const [outroPath, setOutroPath] = useState<string | null>(null);
+  const [crossfadeDuration, setCrossfadeDuration] = useState(0.9);
   const [addWatermark, setAddWatermark] = useState(config.watermark.enabled);
   const [addCreditWatermark, setAddCreditWatermark] = useState(config.creditWatermark.enabled);
   const [creditText, setCreditText] = useState(config.creditWatermark.text);
@@ -239,6 +240,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       addIntroOutro: addIntroOutro && (introPath !== null || outroPath !== null),
       introPath: introPath || undefined,
       outroPath: outroPath || undefined,
+      crossfadeDuration,
       addWatermark,
       addCreditWatermark,
       creditText: addCreditWatermark ? creditText : undefined,
@@ -622,8 +624,22 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                       <span className="text-xs text-[var(--color-text-muted)] max-w-[150px] truncate">{introPath.split(/[\\/]/).pop()}</span>
                     )}
                   </div>
-                  <p className="text-[10px] text-[var(--color-text-muted)] italic">0.9s crossfade with main video</p>
-                  
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-[var(--color-text-secondary)]">Crossfade duration</span>
+                      <span className="text-xs text-[var(--color-text-muted)]">{crossfadeDuration.toFixed(1)}s</span>
+                    </div>
+                    <Slider
+                      value={[crossfadeDuration]}
+                      min={0.1}
+                      max={1}
+                      step={0.1}
+                      onValueChange={(v) => setCrossfadeDuration(v[0] ?? 0.9)}
+                      aria-label="Intro/outro crossfade duration"
+                    />
+                  </div>
+                  <p className="text-[10px] text-[var(--color-text-muted)] italic">{crossfadeDuration.toFixed(1)}s crossfade with main video</p>
+
                   <div className="flex items-center gap-2"><Film className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Outro Video</p></div>
                   <div className="flex gap-2 items-center">
                     <Button variant="outline" onClick={handlePickOutro} className="flex-1 text-sm">\
@@ -634,7 +650,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                       <span className="text-xs text-[var(--color-text-muted)] max-w-[150px] truncate">{outroPath.split(/[\\/]/).pop()}</span>
                     )}
                   </div>
-                  <p className="text-[10px] text-[var(--color-text-muted)] italic">0.9s crossfade with main video</p>
+                  <p className="text-[10px] text-[var(--color-text-muted)] italic">{crossfadeDuration.toFixed(1)}s crossfade with main video</p>
                 </div>
               )}
 
