@@ -84,6 +84,13 @@ pub fn save_app_config(app: tauri::AppHandle, config: serde_json::Value) -> Resu
     Ok(config)
 }
 
+/// Lightweight existence probe used by the Process Clips dialog (v2.0.136)
+/// to drop persisted file picks whose files were moved or deleted.
+#[tauri::command]
+pub fn path_exists(path: String) -> bool {
+    std::path::Path::new(&path).exists()
+}
+
 #[tauri::command]
 pub fn save_cookies(app: tauri::AppHandle, content: String) -> Result<CookiesStatus, String> {
     let cookies_dir = cookies_dir(&app)?;
@@ -639,6 +646,22 @@ fn default_app_config() -> serde_json::Value {
         "repliz": {
             "accessKey": "",
             "secretKey": ""
+        },
+        "processDialog": {
+            "addCaptions": true,
+            "addHook": true,
+            "introPath": null,
+            "outroPath": null,
+            "crossfadeDuration": 0.9,
+            "reframeMode": "face",
+            "captionStyle": "Creator Pop",
+            "hookStyle": "Clean White Box",
+            "centeredBackground": "black",
+            "downloadQuality": "720p",
+            "splitEnabled": false,
+            "splitWebcamPath": "",
+            "splitMainVolume": 100,
+            "splitSecondVolume": 100
         }
     })
 }
