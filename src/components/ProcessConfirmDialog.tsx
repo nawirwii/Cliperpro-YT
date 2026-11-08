@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { X, Film, AlignLeft, Quote, Image as ImageIcon, User, ScanFace, Square, Eye, Sparkles, Zap, MonitorPlay, FolderOpen, DownloadCloud, Volume2, Mic, Gamepad2, MoonStar, type LucideIcon } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
@@ -112,31 +113,146 @@ const PRESET_ICONS: Record<string, LucideIcon> = {
   ceramah: MoonStar,
 };
 
-export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onConfirm, onCancel }: ProcessConfirmDialogProps) {
-  const { config } = useConfigStore();
+/** File name (with extension) from a Windows or POSIX path; "" stays "". */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() ?? "";
+}
 
-  const [addCaptions, setAddCaptions] = useState(true);
-  const [addHook, setAddHook] = useState(true);
+export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onConfirm, onCancel }: ProcessConfirmDialogProps) {
+  const { config, setProcessDialog } = useConfigStore();
+
+  // v2.0.136: every choice restores from the last-used values saved in the
+  // app config, so the dialog reopens exactly as it was left — even after
+  // the app is closed and reopened. The four settings-page-backed fields
+  // (intro/outro, watermark, credit) still seed from their settings
+  // sections, and are written back there on change (see the save effect).
+  const [addCaptions, setAddCaptions] = useState(config.processDialog.addCaptions);
+  const [addHook, setAddHook] = useState(config.processDialog.addHook);
   const [addIntroOutro, setAddIntroOutro] = useState(config.introOutro.enabled);
-  const [introPath, setIntroPath] = useState<string | null>(null);
-  const [outroPath, setOutroPath] = useState<string | null>(null);
-  const [crossfadeDuration, setCrossfadeDuration] = useState(0.9);
+  const [introPath, setIntroPath] = useState<string | null>(config.processDialog.introPath);
+  const [outroPath, setOutroPath] = useState<string | null>(config.processDialog.outroPath);
+  const [crossfadeDuration, setCrossfadeDuration] = useState(config.processDialog.crossfadeDuration);
   const [addWatermark, setAddWatermark] = useState(config.watermark.enabled);
   const [addCreditWatermark, setAddCreditWatermark] = useState(config.creditWatermark.enabled);
   const [creditText, setCreditText] = useState(config.creditWatermark.text);
-  const [reframeMode, setReframeMode] = useState<ReframeMode>("face");
-  const [captionStyle, setCaptionStyle] = useState("Creator Pop");
+  const [reframeMode, setReframeMode] = useState<ReframeMode>(config.processDialog.reframeMode);
+  const [captionStyle, setCaptionStyle] = useState(config.processDialog.captionStyle);
 
-  const [hookStyle, setHookStyle] = useState("Clean White Box");
-  const [centeredBackground, setCenteredBackground] = useState<CenteredBackground>("black");
-  const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>("720p");
-  const [splitEnabled, setSplitEnabled] = useState(false);
-  const [splitWebcamPath, setSplitWebcamPath] = useState("");
-  const [splitWebcamName, setSplitWebcamName] = useState("");
-  const [splitMainVolume, setSplitMainVolume] = useState(100);
-  const [splitSecondVolume, setSplitSecondVolume] = useState(100);
+  const [hookStyle, setHookStyle] = useState(config.processDialog.hookStyle);
+  const [centeredBackground, setCenteredBackground] = useState<CenteredBackground>(config.processDialog.centeredBackground);
+  const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>(config.processDialog.downloadQuality);
+  const [splitEnabled, setSplitEnabled] = useState(config.processDialog.splitEnabled);
+  const [splitWebcamPath, setSplitWebcamPath] = useState(config.processDialog.splitWebcamPath);
+  const [splitWebcamName, setSplitWebcamName] = useState(() => fileNameOf(config.processDialog.splitWebcamPath));
+  const [splitMainVolume, setSplitMainVolume] = useState(config.processDialog.splitMainVolume);
+  const [splitSecondVolume, setSplitSecondVolume] = useState(config.processDialog.splitSecondVolume);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [activePreset, setActivePreset] = useState<string | null>(null);
+
+  // Latest file picks, so the mount-time existence check below only clears
+  // a pick the user has not already replaced by the time it resolves.
+  const latestPathsRef = useRef({ intro: introPath, outro: outroPath, webcam: splitWebcamPath });
+  latestPathsRef.current = { intro: introPath, outro: outroPath, webcam: splitWebcamPath };
+
+  // Drop persisted file picks whose files no longer exist (moved/deleted),
+  // so the dialog never shows a stale file name after a restart. A failed
+  // probe keeps the saved path — never delete the user's pick on an error.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const checks: {
+        path: string | null;
+        clear: () => void;
+        isCurrent: () => boolean;
+      }[] = [
+        {
+          path: introPath,
+          clear: () => setIntroPath(null),
+          isCurrent: () => latestPathsRef.current.intro === introPath,
+        },
+        {
+          path: outroPath,
+          clear: () => setOutroPath(null),
+          isCurrent: () => latestPathsRef.current.outro === outroPath,
+        },
+        {
+          path: splitWebcamPath || null,
+          clear: () => {
+            setSplitWebcamPath("");
+            setSplitWebcamName("");
+          },
+          isCurrent: () => latestPathsRef.current.webcam === splitWebcamPath,
+        },
+      ];
+      for (const { path, clear, isCurrent } of checks) {
+        if (!path) continue;
+        try {
+          const exists = await invoke<boolean>("path_exists", { path });
+          if (!exists && !cancelled && isCurrent()) clear();
+        } catch {
+          /* probe failed — keep the saved path */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount, validating the restored picks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist every dialog choice on change (no debounce: the write is one
+  // tiny local JSON file, and a debounced write could still be pending when
+  // the user closes the app). The first run is skipped so merely opening
+  // the dialog does not rewrite the config.
+  const firstSave = useRef(true);
+  useEffect(() => {
+    if (firstSave.current) {
+      firstSave.current = false;
+      return;
+    }
+    setProcessDialog(
+      {
+        addCaptions,
+        addHook,
+        introPath,
+        outroPath,
+        crossfadeDuration,
+        reframeMode,
+        captionStyle,
+        hookStyle,
+        centeredBackground,
+        downloadQuality,
+        splitEnabled,
+        splitWebcamPath,
+        splitMainVolume,
+        splitSecondVolume,
+      },
+      { addIntroOutro, addWatermark, addCreditWatermark, creditText }
+    ).catch(() => {
+      /* saving is best-effort — the dialog still works this session */
+    });
+  }, [
+    addCaptions,
+    addHook,
+    addIntroOutro,
+    introPath,
+    outroPath,
+    crossfadeDuration,
+    addWatermark,
+    addCreditWatermark,
+    creditText,
+    reframeMode,
+    captionStyle,
+    hookStyle,
+    centeredBackground,
+    downloadQuality,
+    splitEnabled,
+    splitWebcamPath,
+    splitMainVolume,
+    splitSecondVolume,
+    setProcessDialog,
+  ]);
 
   const handlePickWebcam = async () => {
     try {
@@ -149,7 +265,7 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       });
       if (typeof selected === "string" && selected) {
         setSplitWebcamPath(selected);
-        setSplitWebcamName(selected.split(/[\\/]/).pop() ?? selected);
+        setSplitWebcamName(fileNameOf(selected));
       }
     } catch (err) {
       console.error("Failed to pick video", err);
