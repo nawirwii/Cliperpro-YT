@@ -12,6 +12,7 @@ pub fn run() {
             commands::get_available_subtitles,
             commands::load_app_config,
             commands::save_app_config,
+            commands::path_exists,
             commands::list_ai_models,
             commands::detect_gpu,
             commands::find_highlights,
