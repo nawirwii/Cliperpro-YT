@@ -9,6 +9,7 @@ import {
   type CreditWatermarkSettings,
   type HookStyleSettings,
   type IntroOutroSettings,
+  type ProcessDialogSettings,
   type ReplizSettings,
 } from "@/hooks/appConfig";
 
@@ -27,6 +28,22 @@ interface ConfigState {
   setHookStyle: (hookStyle: HookStyleSettings) => Promise<void>;
   setIntroOutro: (introOutro: IntroOutroSettings) => Promise<void>;
   setRepliz: (repliz: ReplizSettings) => Promise<void>;
+  /**
+   * Persist the Process Clips dialog's last-used choices (v2.0.136) in one
+   * atomic config write. The dialog's four settings-page-backed fields
+   * (intro/outro enabled, watermark enabled, credit enabled + text) are
+   * written back into their settings sections, so the dialog and the
+   * settings pages never disagree about the same switch.
+   */
+  setProcessDialog: (
+    dialog: ProcessDialogSettings,
+    derived: {
+      addIntroOutro: boolean;
+      addWatermark: boolean;
+      addCreditWatermark: boolean;
+      creditText: string;
+    }
+  ) => Promise<void>;
   isAIConfigured: () => boolean;
 }
 
@@ -105,6 +122,23 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     const next: AppConfig = {
       ...get().config,
       repliz,
+    };
+    const saved = await saveAppConfig(next);
+    set({ config: saved });
+  },
+
+  setProcessDialog: async (dialog, derived) => {
+    const cur = get().config;
+    const next: AppConfig = {
+      ...cur,
+      processDialog: dialog,
+      introOutro: { ...cur.introOutro, enabled: derived.addIntroOutro },
+      watermark: { ...cur.watermark, enabled: derived.addWatermark },
+      creditWatermark: {
+        ...cur.creditWatermark,
+        enabled: derived.addCreditWatermark,
+        text: derived.creditText,
+      },
     };
     const saved = await saveAppConfig(next);
     set({ config: saved });
