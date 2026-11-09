@@ -30,6 +30,10 @@ export interface ProcessOptions {
   captionStyle?: string;
 
   hookStyle?: string;
+  /** Hook font picked in the Process Clips dialog (name + bundled path).
+      Empty/absent = use the font from the Hook Style settings page. */
+  hookFontName?: string;
+  hookFontPath?: string;
   reframeMode: ReframeMode;
   centeredBackground: CenteredBackground;
   /** Source resolution cap for the download — 720p by default (smaller file). */
