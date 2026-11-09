@@ -102,8 +102,10 @@ export function ProcessingClipsPage() {
           system_message: config.ai.systemMessage,
           temperature: 1.0,
           hook_style: {
-            font_name: hookStyle.fontName,
-            font_path: hookStyle.fontPath,
+            // The dialog font pick wins over the saved settings font —
+            // otherwise changing the font in Process Clips would do nothing.
+            font_name: options.hookFontName || hookStyle.fontName,
+            font_path: options.hookFontPath || hookStyle.fontPath,
             font_size: hookStyle.fontSize,
             font_color: hookStyle.fontColor,
             bg_color: hookStyle.bgColor,
