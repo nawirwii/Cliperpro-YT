@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Card } from "@/components/ui/card";
 import { useConfigStore } from "@/stores/configStore";
+import { listHookFonts, readFontAsBase64, type FontInfo } from "@/hooks/appConfig";
 import type { ReframeMode, CenteredBackground, DownloadQuality } from "@/hooks/processClips";
 
 export type { ProcessOptions } from "@/hooks/processClips";
@@ -139,6 +140,12 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
   const [captionStyle, setCaptionStyle] = useState(config.processDialog.captionStyle);
 
   const [hookStyle, setHookStyle] = useState(config.processDialog.hookStyle);
+  // v2.0.138: the hook font can be picked here too, not only on the Hook
+  // Style settings page. Empty saved pick = follow the settings font.
+  const [hookFontName, setHookFontName] = useState(config.processDialog.hookFontName || config.hookStyle.fontName);
+  const [hookFontPath, setHookFontPath] = useState(config.processDialog.hookFontPath || config.hookStyle.fontPath);
+  const [hookFonts, setHookFonts] = useState<FontInfo[]>([]);
+  const [hookFontDataUrl, setHookFontDataUrl] = useState<string | null>(null);
   const [centeredBackground, setCenteredBackground] = useState<CenteredBackground>(config.processDialog.centeredBackground);
   const [downloadQuality, setDownloadQuality] = useState<DownloadQuality>(config.processDialog.downloadQuality);
   const [splitEnabled, setSplitEnabled] = useState(config.processDialog.splitEnabled);
@@ -201,6 +208,64 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // v2.0.138: load the bundled hook fonts and resolve the restored pick
+  // against the real list. A saved font that no longer ships (e.g. the
+  // removed Capo Sfogliato) falls back to the settings font, then to the
+  // first bundled font — the dialog never offers a font that renders boxes.
+  useEffect(() => {
+    let cancelled = false;
+    listHookFonts()
+      .then((result) => {
+        if (cancelled) return;
+        setHookFonts(result);
+        if (result.length === 0) return;
+        const seeded = hookFontName;
+        const found = result.find((f) => f.name === seeded);
+        const settingsFont = result.find((f) => f.name === config.hookStyle.fontName);
+        const pick = found || settingsFont || result[0];
+        if (pick.name !== seeded || pick.path !== hookFontPath) {
+          setHookFontName(pick.name);
+          setHookFontPath(pick.path);
+        }
+      })
+      .catch(() => {
+        /* list failed — keep the seeded pick; the backend falls back */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount; the bundled font list is fixed per install.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load the picked font as a data URL so the preview line below renders
+  // in the actual font.
+  useEffect(() => {
+    if (!hookFontPath) {
+      setHookFontDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    readFontAsBase64(hookFontPath)
+      .then((url) => {
+        if (!cancelled) setHookFontDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setHookFontDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hookFontPath]);
+
+  const handleHookFontSelect = (name: string) => {
+    const found = hookFonts.find((f) => f.name === name);
+    if (!found) return;
+    setHookFontName(found.name);
+    setHookFontPath(found.path);
+    setActivePreset(null);
+  };
+
   // Persist every dialog choice on change (no debounce: the write is one
   // tiny local JSON file, and a debounced write could still be pending when
   // the user closes the app). The first run is skipped so merely opening
@@ -221,6 +286,8 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
         reframeMode,
         captionStyle,
         hookStyle,
+        hookFontName,
+        hookFontPath,
         centeredBackground,
         downloadQuality,
         splitEnabled,
@@ -245,6 +312,8 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
     reframeMode,
     captionStyle,
     hookStyle,
+    hookFontName,
+    hookFontPath,
     centeredBackground,
     downloadQuality,
     splitEnabled,
@@ -363,6 +432,8 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
       captionStyle,
 
       hookStyle,
+      hookFontName,
+      hookFontPath,
       reframeMode,
       centeredBackground,
       downloadQuality,
@@ -774,6 +845,32 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                 <div className="p-3 rounded-[var(--radius-sm)] bg-[var(--color-bg-secondary)] space-y-3">
                   <div className="flex items-center gap-2"><Quote className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Hook Visual Style</p></div>
                   <div className="grid grid-cols-2 gap-1.5">{HOOK_STYLES.map((s) => <StyleChoice key={s} name={s} selected={hookStyle === s} onClick={() => { setHookStyle(s); setActivePreset(null); }} />)}</div>
+                  {/* v2.0.138: hook font picker (30 bundled fonts, no 3D) */}
+                  <div className="space-y-1.5 pt-1">
+                    <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Hook Font</p>
+                    <select
+                      value={hookFontName}
+                      onChange={(e) => handleHookFontSelect(e.target.value)}
+                      className="w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                    >
+                      {hookFonts.map((f) => (
+                        <option key={f.path} value={f.name}>{f.name}</option>
+                      ))}
+                    </select>
+                    {hookFontDataUrl && (
+                      <>
+                        <style>{`
+                          @font-face {
+                            font-family: "hook-dialog-font";
+                            src: url("${hookFontDataUrl}") format("truetype");
+                          }
+                        `}</style>
+                        <p className="text-center text-lg leading-tight text-[var(--color-text-primary)]" style={{ fontFamily: `"hook-dialog-font", ${hookFontName}, sans-serif` }}>
+                          HOOK PREVIEW
+                        </p>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
               {addCaptions && (
