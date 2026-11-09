@@ -82,6 +82,10 @@ export interface ProcessDialogSettings {
   reframeMode: ReframeMode;
   captionStyle: string;
   hookStyle: string;
+  /** Hook font picked in the dialog (name + bundled path). Empty = follow
+      the font chosen on the Hook Style settings page. */
+  hookFontName: string;
+  hookFontPath: string;
   centeredBackground: CenteredBackground;
   downloadQuality: DownloadQuality;
   splitEnabled: boolean;
@@ -173,6 +177,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     reframeMode: "face",
     captionStyle: "Creator Pop",
     hookStyle: "Clean White Box",
+    hookFontName: "",
+    hookFontPath: "",
     centeredBackground: "black",
     downloadQuality: "720p",
     splitEnabled: false,
