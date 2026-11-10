@@ -827,14 +827,20 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                   </div>
                   <p className="text-[10px] text-[var(--color-text-muted)] italic">{crossfadeDuration.toFixed(1)}s crossfade with main video</p>
 
-                  <div className="flex items-center gap-2"><Film className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Outro Video</p></div>
+                  <div className="flex items-center gap-2"><Film className="w-4 h-4 text-[var(--color-accent)]" /><p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">Outro Video <span className="normal-case tracking-normal">(optional)</span></p></div>
                   <div className="flex gap-2 items-center">
-                    <Button variant="outline" onClick={handlePickOutro} className="flex-1 text-sm">\
-                      <FolderOpen className="w-4 h-4 mr-2" />\
-                      {outroPath ? "Change Outro" : "Pick Outro Video"}\
+                    <Button variant="outline" onClick={handlePickOutro} className="flex-1 text-sm">
+                      <FolderOpen className="w-4 h-4 mr-2" />
+                      {outroPath ? "Change Outro" : "Pick Outro Video"}
                     </Button>
                     {outroPath && (
                       <span className="text-xs text-[var(--color-text-muted)] max-w-[150px] truncate">{outroPath.split(/[\\/]/).pop()}</span>
+                    )}
+                    {outroPath && (
+                      <Button variant="outline" onClick={() => setOutroPath(null)} className="text-sm" aria-label="Remove outro video">
+                        <X className="w-4 h-4 mr-1" />
+                        Remove
+                      </Button>
                     )}
                   </div>
                   <p className="text-[10px] text-[var(--color-text-muted)] italic">{crossfadeDuration.toFixed(1)}s crossfade with main video</p>
