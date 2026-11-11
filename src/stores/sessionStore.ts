@@ -11,6 +11,12 @@ interface SessionState {
   clearSession: () => void;
   /** Mark highlight indices as processed (rendered) for the given session. */
   markProcessed: (sessionDir: string, indices: number[]) => void;
+  /** v2.0.141: per-highlight intro topics, keyed by sessionDir then highlight
+      index. In-memory only (same durability as markProcessed): survives page
+      navigation inside the app, resets on app restart. The topic NEVER feeds
+      the clip title or filename. */
+  highlightTopics: Record<string, Record<number, string>>;
+  setHighlightTopic: (sessionDir: string, index: number, topic: string) => void;
   toggleSelected: (index: number) => void;
   selectAll: () => void;
   deselectAll: () => void;
@@ -21,6 +27,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   session: null,
   origin: "create",
   selectedIndices: new Set(),
+
+  highlightTopics: {},
+
+  // v2.0.141: store an intro topic for one highlight. Guarded by sessionDir
+  // so a stale topic is never applied to another session.
+  setHighlightTopic: (sessionDir, index, topic) =>
+    set((state) => ({
+      highlightTopics: {
+        ...state.highlightTopics,
+        [sessionDir]: {
+          ...(state.highlightTopics[sessionDir] ?? {}),
+          [index]: topic,
+        },
+      },
+    })),
 
   setSession: (session, origin = "create") =>
     set({
