@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
+  Check,
   CheckSquare,
+  Copy,
   Square,
   Flame,
   Zap,
@@ -13,11 +15,16 @@ import {
   Film,
   FolderOpen,
   Play,
+  Loader2,
+  Sparkles,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useConfigStore } from "@/stores/configStore";
 import type { Highlight } from "@/hooks/highlights";
 import { ProcessConfirmDialog } from "@/components/ProcessConfirmDialog";
 
@@ -65,7 +72,7 @@ function stripMs(ts: string): string {
 
 export function HighlightSelectionPage() {
   const navigate = useNavigate();
-  const { session, origin, selectedIndices, toggleSelected, selectAll, deselectAll, getSelectedHighlights } =
+  const { session, origin, selectedIndices, toggleSelected, selectAll, deselectAll, getSelectedHighlights, highlightTopics, setHighlightTopic } =
     useSessionStore();
 
   const [showProcessDialog, setShowProcessDialog] = useState(false);
@@ -142,6 +149,8 @@ export function HighlightSelectionPage() {
             selected={selectedIndices.has(i) && !processedSet.has(i)}
             processed={processedSet.has(i)}
             sessionDir={session.session_dir}
+            topic={highlightTopics[session.session_dir]?.[i] ?? h.title}
+            onTopicChange={(t) => setHighlightTopic(session.session_dir, i, t)}
             onToggle={() => { if (!processedSet.has(i)) toggleSelected(i); }}
           />
         ))}
@@ -196,14 +205,71 @@ interface HighlightCardProps {
   selected: boolean;
   processed: boolean;
   sessionDir: string;
+  topic: string;
+  onTopicChange: (topic: string) => void;
   onToggle: () => void;
 }
 
-function HighlightCard({ index, highlight, selected, processed, sessionDir, onToggle }: HighlightCardProps) {
+function HighlightCard({ index, highlight, selected, processed, sessionDir, topic, onTopicChange, onToggle }: HighlightCardProps) {
   const navigate = useNavigate();
+  const { config } = useConfigStore();
   const v = viralityStyle(highlight.virality_score);
+  // v2.0.141: per-card state only - generating/copy never touch other cards.
+  const [generating, setGenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const clipPath = `${sessionDir}\\clips\\clip_${String(index).padStart(3, "0")}\\${sanitizeClipFilename(highlight.title)}.mp4`;
+
+  const copyTopic = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(topic);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // silent
+    }
+  };
+
+  // v2.0.141: generate an intro-video topic from this highlight, reusing the
+  // same generate_social_title command as ClipDetailPage. Only the returned
+  // title is used; the clip title (and filename) is never touched.
+  const handleGenerateTopic = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const tg = config.ai;
+    if (!tg.apiKey || !tg.model) {
+      toast.error("AI provider not configured. Go to AI Models settings.");
+      return;
+    }
+    setGenerating(true);
+    try {
+      const result = await invoke<{ title: string; description: string; fallback?: boolean }>("generate_social_title", {
+        title: highlight.title,
+        hookText: highlight.hook_text,
+        description: highlight.description,
+        apiKey: tg.apiKey,
+        baseUrl: tg.baseUrl,
+        model: tg.model,
+        sessionDir,
+      });
+      if (!result?.title) {
+        toast.error("AI mengembalikan respons kosong. Coba model atau prompt berbeda.");
+        return;
+      }
+      if (result.fallback) {
+        onTopicChange(highlight.title);
+        toast.warning("AI tidak mengembalikan teks - dipakai judul asli. Coba model lain atau periksa provider.");
+      } else {
+        onTopicChange(result.title);
+        toast.success("Topik intro generated");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Generation failed: ${msg}`);
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const handleOpenClip = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -304,6 +370,48 @@ function HighlightCard({ index, highlight, selected, processed, sessionDir, onTo
               </p>
             </div>
           )}
+
+          {/* Topik Intro (v2.0.141): separate from the clip title - the user
+              copies this to an AI video tool to generate the intro video
+              before processing. It never changes the clip title/filename. */}
+          <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-medium text-[var(--color-text-muted)]">Topik Intro</label>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleGenerateTopic}
+                  disabled={generating}
+                  className="h-6 px-2 gap-1 text-xs text-[var(--color-accent)]"
+                  aria-label="Generate intro topic with AI"
+                >
+                  {generating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5" />
+                  )}
+                  {generating ? "Generating..." : "Generate with AI"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={copyTopic}
+                  className="h-6 px-2 text-xs"
+                  aria-label="Copy intro topic"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                </Button>
+              </div>
+            </div>
+            <Input
+              value={topic}
+              onChange={(e) => onTopicChange(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              placeholder="Topik untuk video intro"
+              className="h-8 text-sm"
+            />
+          </div>
 
           {/* Footer */}
           <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
