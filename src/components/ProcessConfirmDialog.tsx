@@ -810,6 +810,12 @@ export function ProcessConfirmDialog({ clipCount, captionsAvailable = true, onCo
                     {introPath && (
                       <span className="text-xs text-[var(--color-text-muted)] max-w-[150px] truncate">{introPath.split(/[\\/]/).pop()}</span>
                     )}
+                    {introPath && (
+                      <Button variant="outline" onClick={() => setIntroPath(null)} className="text-sm" aria-label="Remove intro video">
+                        <X className="w-4 h-4 mr-1" />
+                        Remove
+                      </Button>
+                    )}
                   </div>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
