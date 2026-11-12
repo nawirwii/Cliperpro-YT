@@ -17,6 +17,15 @@ interface SessionState {
       the clip title or filename. */
   highlightTopics: Record<string, Record<number, string>>;
   setHighlightTopic: (sessionDir: string, index: number, topic: string) => void;
+  /** v2.0.142: per-highlight intro/outro video paths, keyed by sessionDir
+      then highlight index. In-memory only (same durability as
+      highlightTopics): survives page navigation inside the app, resets on
+      app restart. A null pick means "fall back to the global intro/outro
+      from the Process Clips dialog" for that clip. */
+  highlightIntros: Record<string, Record<number, string>>;
+  highlightOutros: Record<string, Record<number, string>>;
+  setHighlightIntro: (sessionDir: string, index: number, path: string | null) => void;
+  setHighlightOutro: (sessionDir: string, index: number, path: string | null) => void;
   toggleSelected: (index: number) => void;
   selectAll: () => void;
   deselectAll: () => void;
@@ -42,6 +51,33 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         },
       },
     })),
+
+  highlightIntros: {},
+  highlightOutros: {},
+
+  // v2.0.142: store an intro video path for one highlight. A null path
+  // removes the pick (fall back to the global intro). Guarded by
+  // sessionDir so a stale pick is never applied to another session.
+  setHighlightIntro: (sessionDir, index, path) =>
+    set((state) => {
+      const perSession = { ...(state.highlightIntros[sessionDir] ?? {}) };
+      if (path === null) delete perSession[index];
+      else perSession[index] = path;
+      return {
+        highlightIntros: { ...state.highlightIntros, [sessionDir]: perSession },
+      };
+    }),
+
+  // v2.0.142: same as setHighlightIntro, for the outro video path.
+  setHighlightOutro: (sessionDir, index, path) =>
+    set((state) => {
+      const perSession = { ...(state.highlightOutros[sessionDir] ?? {}) };
+      if (path === null) delete perSession[index];
+      else perSession[index] = path;
+      return {
+        highlightOutros: { ...state.highlightOutros, [sessionDir]: perSession },
+      };
+    }),
 
   setSession: (session, origin = "create") =>
     set({

@@ -17,8 +17,10 @@ import {
   Play,
   Loader2,
   Sparkles,
+  X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -70,9 +72,15 @@ function stripMs(ts: string): string {
   return ts.split(",")[0];
 }
 
+/** File name (with extension) from a Windows or POSIX path; "" stays "".
+    Same helper as ProcessConfirmDialog (v2.0.142). */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() ?? "";
+}
+
 export function HighlightSelectionPage() {
   const navigate = useNavigate();
-  const { session, origin, selectedIndices, toggleSelected, selectAll, deselectAll, getSelectedHighlights, highlightTopics, setHighlightTopic } =
+  const { session, origin, selectedIndices, toggleSelected, selectAll, deselectAll, getSelectedHighlights, highlightTopics, setHighlightTopic, highlightIntros, highlightOutros, setHighlightIntro, setHighlightOutro } =
     useSessionStore();
 
   const [showProcessDialog, setShowProcessDialog] = useState(false);
@@ -80,6 +88,50 @@ export function HighlightSelectionPage() {
   useEffect(() => {
     if (!session) navigate("/");
   }, [session, navigate]);
+
+  const sessionDir = session?.session_dir;
+
+  // v2.0.142: drop per-highlight intro/outro picks whose files no longer
+  // exist (moved/deleted) - same rule as the Process Clips dialog
+  // (v2.0.136). A failed probe keeps the saved pick; a pick replaced
+  // while probing keeps the new value.
+  useEffect(() => {
+    if (!sessionDir) return;
+    let cancelled = false;
+    (async () => {
+      const store = useSessionStore.getState();
+      const checks: { path: string; clear: () => void; isCurrent: () => boolean }[] = [];
+      for (const [key, path] of Object.entries(store.highlightIntros[sessionDir] ?? {})) {
+        const i = Number(key);
+        checks.push({
+          path,
+          clear: () => useSessionStore.getState().setHighlightIntro(sessionDir, i, null),
+          isCurrent: () => useSessionStore.getState().highlightIntros[sessionDir]?.[i] === path,
+        });
+      }
+      for (const [key, path] of Object.entries(store.highlightOutros[sessionDir] ?? {})) {
+        const i = Number(key);
+        checks.push({
+          path,
+          clear: () => useSessionStore.getState().setHighlightOutro(sessionDir, i, null),
+          isCurrent: () => useSessionStore.getState().highlightOutros[sessionDir]?.[i] === path,
+        });
+      }
+      for (const { path, clear, isCurrent } of checks) {
+        try {
+          const exists = await invoke<boolean>("path_exists", { path });
+          if (!exists && !cancelled && isCurrent()) clear();
+        } catch {
+          /* probe failed - keep the saved pick */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Runs once per session, validating the stored picks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionDir]);
 
   if (!session) return null;
 
@@ -151,6 +203,10 @@ export function HighlightSelectionPage() {
             sessionDir={session.session_dir}
             topic={highlightTopics[session.session_dir]?.[i] ?? h.title}
             onTopicChange={(t) => setHighlightTopic(session.session_dir, i, t)}
+            intro={highlightIntros[session.session_dir]?.[i] ?? null}
+            outro={highlightOutros[session.session_dir]?.[i] ?? null}
+            onIntroChange={(p) => setHighlightIntro(session.session_dir, i, p)}
+            onOutroChange={(p) => setHighlightOutro(session.session_dir, i, p)}
             onToggle={() => { if (!processedSet.has(i)) toggleSelected(i); }}
           />
         ))}
@@ -180,15 +236,29 @@ export function HighlightSelectionPage() {
             // Attach original highlight index for dedup tracking
             const highlightsWithIndex = selected.map((h) => {
               const originalIndex = highlights.indexOf(h);
-              return { ...h, _highlight_index: originalIndex };
+              return {
+                ...h,
+                _highlight_index: originalIndex,
+                // v2.0.142: per-highlight intro/outro override (null = fall
+                // back to the global intro/outro from the Process Clips
+                // dialog for this clip).
+                introPath: highlightIntros[session.session_dir]?.[originalIndex] ?? null,
+                outroPath: highlightOutros[session.session_dir]?.[originalIndex] ?? null,
+              };
             });
+            // v2.0.142: the dialog only enables Intro & Outro when a GLOBAL
+            // file is picked; a per-highlight pick enables it for its clip
+            // too. The dialog toggle still gates the global fallback, not
+            // the per-highlight picks - a pick is an explicit per-clip
+            // choice and always applies to its clip.
+            const hasPerHighlightPick = highlightsWithIndex.some((h) => h.introPath || h.outroPath);
             navigate("/processing-clips", {
               state: {
                 url: session.url,
                 localPath: session.local_video_path,
                 highlights: highlightsWithIndex,
                 sessionDir: session.session_dir,
-                options,
+                options: { ...options, addIntroOutro: options.addIntroOutro || hasPerHighlightPick },
               },
             });
           }}
@@ -207,10 +277,14 @@ interface HighlightCardProps {
   sessionDir: string;
   topic: string;
   onTopicChange: (topic: string) => void;
+  intro: string | null;
+  outro: string | null;
+  onIntroChange: (path: string | null) => void;
+  onOutroChange: (path: string | null) => void;
   onToggle: () => void;
 }
 
-function HighlightCard({ index, highlight, selected, processed, sessionDir, topic, onTopicChange, onToggle }: HighlightCardProps) {
+function HighlightCard({ index, highlight, selected, processed, sessionDir, topic, onTopicChange, intro, outro, onIntroChange, onOutroChange, onToggle }: HighlightCardProps) {
   const navigate = useNavigate();
   const { config } = useConfigStore();
   const v = viralityStyle(highlight.virality_score);
@@ -274,6 +348,46 @@ function HighlightCard({ index, highlight, selected, processed, sessionDir, topi
   const handleOpenClip = (e: React.MouseEvent) => {
     e.stopPropagation();
     invoke("open_path_in_explorer", { path: clipPath }).catch(console.error);
+  };
+
+  // v2.0.142: pick an intro/outro video for THIS highlight, using the same
+  // Tauri file dialog (video filter) as ProcessConfirmDialog.
+  const pickVideo = async (): Promise<string | null> => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [
+          { name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "avi", "m4v"] },
+          { name: "All files", extensions: ["*"] },
+        ],
+      });
+      return typeof selected === "string" && selected ? selected : null;
+    } catch (err) {
+      console.error("Failed to pick video", err);
+      return null;
+    }
+  };
+
+  const handlePickIntro = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const picked = await pickVideo();
+    if (picked) onIntroChange(picked);
+  };
+
+  const handlePickOutro = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const picked = await pickVideo();
+    if (picked) onOutroChange(picked);
+  };
+
+  const handleRemoveIntro = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onIntroChange(null);
+  };
+
+  const handleRemoveOutro = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onOutroChange(null);
   };
 
   const handleViewClip = (e: React.MouseEvent) => {
@@ -411,6 +525,66 @@ function HighlightCard({ index, highlight, selected, processed, sessionDir, topi
               placeholder="Topik untuk video intro"
               className="h-8 text-sm"
             />
+          </div>
+
+          {/* Video Intro & Outro per highlight (v2.0.142): picked here,
+              before Process Clips. A pick wins for this clip; without one,
+              the global intro/outro from the Process Clips dialog is used
+              as fallback. Mirrors the dialog rows (file name + Change +
+              Remove). */}
+          <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-[var(--color-text-muted)]">Video Intro</label>
+                {intro && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleRemoveIntro}
+                    className="h-6 px-2 gap-1 text-xs"
+                    aria-label="Remove intro video"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handlePickIntro} className="gap-1.5">
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  {intro ? "Change Intro" : "Pick Intro Video"}
+                </Button>
+                {intro && (
+                  <span className="text-xs text-[var(--color-text-muted)] truncate">{fileNameOf(intro)}</span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-[var(--color-text-muted)]">Video Outro <span className="normal-case">(optional)</span></label>
+                {outro && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleRemoveOutro}
+                    className="h-6 px-2 gap-1 text-xs"
+                    aria-label="Remove outro video"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handlePickOutro} className="gap-1.5">
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  {outro ? "Change Outro" : "Pick Outro Video"}
+                </Button>
+                {outro && (
+                  <span className="text-xs text-[var(--color-text-muted)] truncate">{fileNameOf(outro)}</span>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Footer */}

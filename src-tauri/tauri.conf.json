@@ -1,6 +1,6 @@
 {
   "identifier": "com.jipraks.ytshortclipper-v2",
-  "version": "2.0.141",
+  "version": "2.0.142",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173"

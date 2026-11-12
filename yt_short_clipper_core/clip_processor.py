@@ -48,6 +48,19 @@ def sanitize_clip_filename(title: str) -> str:
     return name or "Untitled"
 
 
+def resolve_clip_intro_outro(highlight: dict[str, Any], intro_path, outro_path):
+    """v2.0.142: resolve the intro/outro files for one clip.
+
+    A per-highlight pick (attached by HighlightSelectionPage as
+    "introPath"/"outroPath") wins for this clip; an empty or missing pick
+    falls back to the global paths from the Process Clips dialog. Returns
+    (intro, outro) with "" normalized to None.
+    """
+    clip_intro = highlight.get("introPath") or intro_path or None
+    clip_outro = highlight.get("outroPath") or outro_path or None
+    return clip_intro, clip_outro
+
+
 def _load_caption_words(session_path: Path, log: LogFn) -> list[dict[str, Any]]:
     """Load the full-video word-timing list saved during the find-highlights phase.
 
@@ -518,13 +531,16 @@ def process_selected_highlights(
             log(f"[{i}/{total}] Watermark overlay skipped (disabled)")
 
         # Step 5.5: Intro/Outro (if enabled)
-        if add_intro_outro and (intro_path or outro_path):
+        # v2.0.142: resolve per-clip paths first - a per-highlight pick
+        # wins for this clip, otherwise the global dialog paths apply.
+        clip_intro_path, clip_outro_path = resolve_clip_intro_outro(h, intro_path, outro_path)
+        if add_intro_outro and (clip_intro_path or clip_outro_path):
             intro_outro_output_path = str(temp_dir / f"with_intro_outro_{i:03d}.mp4")
             intro_outro_result = apply_intro_outro(
                 input_path=video_path,
                 output_path=intro_outro_output_path,
-                intro_path=intro_path,
-                outro_path=outro_path,
+                intro_path=clip_intro_path,
+                outro_path=clip_outro_path,
                 log=lambda m: log(f"[{i}/{total}] {m}"),
                 gpu_config=gpu_config,
                 crossfade_duration=crossfade_duration,
@@ -555,9 +571,9 @@ def process_selected_highlights(
             "duration_seconds": h.get("duration_seconds", 0),
             "has_hook": add_hook and bool(h.get("hook_text")),
             "has_captions": clip_had_captions,
-            "has_intro_outro": add_intro_outro and (intro_path or outro_path),
-            "intro_path": intro_path,
-            "outro_path": outro_path,
+            "has_intro_outro": add_intro_outro and (clip_intro_path or clip_outro_path),
+            "intro_path": clip_intro_path,
+            "outro_path": clip_outro_path,
             "youtube_title": h.get("title", ""),
             "youtube_description": h.get("description", ""),
             "processed_at": datetime.now().isoformat(),
