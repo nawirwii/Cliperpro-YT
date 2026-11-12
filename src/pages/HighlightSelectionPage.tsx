@@ -234,18 +234,25 @@ export function HighlightSelectionPage() {
             setShowProcessDialog(false);
             const selected = getSelectedHighlights();
             // Attach original highlight index for dedup tracking
-            const highlightsWithIndex = selected.map((h) => {
-              const originalIndex = highlights.indexOf(h);
-              return {
-                ...h,
-                _highlight_index: originalIndex,
-                // v2.0.142: per-highlight intro/outro override (null = fall
-                // back to the global intro/outro from the Process Clips
-                // dialog for this clip).
-                introPath: highlightIntros[session.session_dir]?.[originalIndex] ?? null,
-                outroPath: highlightOutros[session.session_dir]?.[originalIndex] ?? null,
-              };
-            });
+            const highlightsWithIndex = selected
+              .map((h) => {
+                const originalIndex = highlights.indexOf(h);
+                return {
+                  ...h,
+                  _highlight_index: originalIndex,
+                  // v2.0.142: per-highlight intro/outro override (null = fall
+                  // back to the global intro/outro from the Process Clips
+                  // dialog for this clip).
+                  introPath: highlightIntros[session.session_dir]?.[originalIndex] ?? null,
+                  outroPath: highlightOutros[session.session_dir]?.[originalIndex] ?? null,
+                };
+              })
+              // v2.0.143: send only selected highlights that have NOT been
+              // processed yet - the same filter as selectedCount (the
+              // "Process N clips" button). getSelectedHighlights already
+              // excludes processed highlights; this is the page-level guard
+              // so the payload can never outgrow the button count.
+              .filter((h) => !processedSet.has(h._highlight_index));
             // v2.0.142: the dialog only enables Intro & Outro when a GLOBAL
             // file is picked; a per-highlight pick enables it for its clip
             // too. The dialog toggle still gates the global fallback, not
