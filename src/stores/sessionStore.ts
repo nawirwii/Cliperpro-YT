@@ -83,7 +83,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({
       session,
       origin,
-      selectedIndices: new Set(session.highlights.map((_, i) => i)),
+      // v2.0.143: never pre-select an already-processed highlight. The
+      // button count and the cards already hide processed highlights,
+      // so starting from the unprocessed ones keeps the selection state
+      // truthful (before this, all indices were pre-selected and a
+      // processed highlight could never leave the set).
+      selectedIndices: new Set(
+        session.highlights
+          .map((_, i) => i)
+          .filter((i) => !(session.processed_highlights ?? []).includes(i)),
+      ),
     }),
 
   clearSession: () => set({ session: null, selectedIndices: new Set() }),
@@ -97,11 +106,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (!session || session.session_dir !== sessionDir || indices.length === 0) return {};
       const next = new Set(session.processed_highlights ?? []);
       indices.forEach((i) => next.add(i));
+      // v2.0.143: a processed highlight leaves the selection, so it can
+      // never be sent to the backend again by any caller.
+      const selected = new Set(state.selectedIndices);
+      indices.forEach((i) => selected.delete(i));
       return {
         session: {
           ...session,
           processed_highlights: [...next].sort((a, b) => a - b),
         },
+        selectedIndices: selected,
       };
     }),
 
@@ -118,7 +132,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   selectAll: () =>
     set((state) => ({
-      selectedIndices: new Set(state.session?.highlights.map((_, i) => i) ?? []),
+      // v2.0.143: select only highlights that still need processing, so
+      // the set matches the "Process N clips" button count and the card
+      // checkmarks (processed cards already render unchecked).
+      selectedIndices: new Set(
+        (state.session?.highlights.map((_, i) => i) ?? []).filter(
+          (i) => !(state.session?.processed_highlights ?? []).includes(i),
+        ),
+      ),
     })),
 
   deselectAll: () => set({ selectedIndices: new Set() }),
@@ -126,6 +147,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   getSelectedHighlights: () => {
     const { session, selectedIndices } = get();
     if (!session) return [];
-    return session.highlights.filter((_, i) => selectedIndices.has(i));
+    // v2.0.143: the single source of truth for "processed" is
+    // session.processed_highlights. A processed highlight is never
+    // returned, even if its index is still in selectedIndices (before
+    // this, the filter below was the only one, so a processed highlight
+    // that could not be unchecked was still sent to the backend).
+    const processed = new Set(session.processed_highlights ?? []);
+    return session.highlights.filter((_, i) => selectedIndices.has(i) && !processed.has(i));
   },
 }));
